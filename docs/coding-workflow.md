@@ -211,3 +211,11 @@ Those tests are not live model evaluations. Real endpoint behavior, quality,
 latency, and token savings must be measured with configured live profiles.
 SQLite persistence, cached retrieval, semantic search, additional providers,
 container isolation, and Git automation remain future work.
+
+## Version 0.6: independent lint profiles
+
+`--allow-exec` now permits explicitly configured test and/or lint commands.
+`--test-command` is optional when `--lint-command` is present. The original test
+flags remain compatible. Dedicated `run_lint` and opt-in `run_lint_fix` are
+documented in [Tests and linting](testing-and-linting.md). The fixer automatically
+rechecks lint; behavioral tests must be rerun separately.

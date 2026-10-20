@@ -11,17 +11,20 @@ from pathlib import Path
 from agent.core.types import ToolResult
 
 
-class LocalTestRunner:
-    def __init__(self, root: Path, command, timeout=60, output_limit=65536):
+class LocalCommandRunner:
+    def __init__(self, root: Path, command, timeout=60, output_limit=65536, *, check='test'):
         self.root = root.resolve(strict=True)
         if not self.root.is_dir():
-            raise ValueError("Test working directory must be a directory.")
+            raise ValueError("Verification working directory must be a directory.")
         if (not isinstance(command, (list, tuple)) or not command or not command[0]
                 or any(not isinstance(arg, str) or '\x00' in arg for arg in command)):
-            raise ValueError("Test command must be a nonempty argument list.")
+            raise ValueError("Verification command must be a nonempty argument list.")
         if not math.isfinite(timeout) or timeout <= 0 or type(output_limit) is not int or output_limit < 1:
             raise ValueError("Timeout and output limit must be positive and finite.")
         self.command, self.timeout, self.output_limit = tuple(command), timeout, output_limit
+        if check not in {'test', 'lint', 'lint_fix'}:
+            raise ValueError('Unknown verification profile.')
+        self.check = check
 
     @staticmethod
     def _stop(process):
@@ -90,11 +93,31 @@ class LocalTestRunner:
                 reader.join(timeout=2)
             if done.is_set() or reader.ident is None:
                 process.stdout.close()
-        return {'passed': process.returncode == 0 and not timed_out,
+        return {'check': self.check, 'passed': process.returncode == 0 and not timed_out,
                 'exit_code': process.returncode, 'output': bytes(captured).decode('utf-8', errors='replace'),
                 'elapsed_seconds': round(time.monotonic() - started, 6), 'timed_out': timed_out,
                 'output_truncated': truncated, 'capture_complete': done.is_set()}
 
     def as_tool(self):
         result = self.run()
+        return ToolResult(result['passed'], json.dumps(result, ensure_ascii=False))
+
+
+# Preserve the original public import used by integrations and the evaluator.
+LocalTestRunner = LocalCommandRunner
+
+
+class LintFixRunner:
+    """Run the explicitly configured fixer, then recheck lint; never install tools."""
+    def __init__(self, fixer, lint):
+        if fixer.root != lint.root:
+            raise ValueError('Fix and lint commands must use the same workspace.')
+        self.fixer, self.lint = fixer, lint
+
+    def as_tool(self):
+        fixed = self.fixer.run()
+        linted = None if fixed['timed_out'] else self.lint.run()
+        result = {'check': 'lint_fix',
+                  'passed': fixed['passed'] and linted is not None and linted['passed'],
+                  'fix': fixed, 'lint': linted, 'requires_test_rerun': True}
         return ToolResult(result['passed'], json.dumps(result, ensure_ascii=False))

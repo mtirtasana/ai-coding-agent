@@ -9,7 +9,7 @@ from collections import deque
 
 
 SKIP_DIRS = {'.git', '.ssh', '.aws', '.venv', 'venv', 'node_modules', '__pycache__',
-             '.tox', 'build', 'dist'}
+             '.tox', '.ruff_cache', 'build', 'dist'}
 
 
 class FileTools:

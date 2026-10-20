@@ -76,3 +76,43 @@ class CliTests(unittest.TestCase):
                         '--base-url', 'http://localhost:1234/v1', '--api-key-env', 'TEST_COMPATIBLE_KEY',
                         '--workspace', directory)
         factory.assert_called_once_with('local-test', 'http://localhost:1234/v1', 'test-only')
+
+    def test_lint_only_and_combined_profiles(self):
+        from agent.adapters.models import DemoProvider
+        combinations = [
+            (['--lint-command', 'python -c pass'], {'run_lint'}),
+            (['--test-command', 'python -c pass', '--lint-command', 'python -c pass',
+              '--lint-fix-command', 'python -c pass', '--allow-write'],
+             {'run_tests', 'run_lint', 'run_lint_fix'}),
+        ]
+        for flags, expected in combinations:
+            provider = DemoProvider()
+            with tempfile.TemporaryDirectory() as directory, \
+                    patch.object(provider, 'generate', wraps=provider.generate) as generate, \
+                    patch('agent.cli.DemoProvider', return_value=provider):
+                self.invoke('Inspect', '--provider', 'demo', '--workspace', directory, '--allow-exec', *flags)
+                checks = {s.name for s in generate.call_args_list[0].args[1]
+                          if s.name in {'run_tests', 'run_lint', 'run_lint_fix'}}
+                self.assertEqual(checks, expected)
+
+    def test_lint_fix_configuration_requires_explicit_permissions(self):
+        for flags in [
+            ['--lint-command', 'python -c pass'],
+            ['--allow-exec', '--lint-fix-command', 'python -c pass', '--allow-write'],
+            ['--allow-exec', '--lint-fix-command', 'python -c pass', '--lint-command', 'python -c pass'],
+        ]:
+            with self.subTest(flags=flags), self.assertRaises(SystemExit) as result:
+                self.invoke('Inspect', '--provider', 'demo', *flags)
+            self.assertEqual(result.exception.code, 2)
+
+    def test_planning_blocks_all_configured_checks_and_fixes(self):
+        from agent.adapters.models import DemoProvider
+        provider = DemoProvider()
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(provider, 'generate', wraps=provider.generate) as generate, \
+                patch('agent.cli.DemoProvider', return_value=provider):
+            self.invoke('Inspect', '--provider', 'demo', '--workspace', directory, '--allow-exec',
+                        '--mode', 'plan', '--allow-write', '--test-command', 'python -c pass',
+                        '--lint-command', 'python -c pass', '--lint-fix-command', 'python -c pass')
+            names = {s.name for s in generate.call_args_list[0].args[1]}
+            self.assertFalse(names & {'run_tests', 'run_lint', 'run_lint_fix'})

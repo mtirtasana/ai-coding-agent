@@ -5,4 +5,5 @@
 - Keine Zugangsdaten in Dateien oder Commits schreiben.
 - Die Pfadbeschränkungen in `agent/files.py` erhalten.
 - Prüfen mit `python -m unittest discover -s tests -v`.
+- Linting mit `python -m ruff check .`; Ruff ist im optionalen Extra `.[dev]` enthalten.
 - Ohne tatsächliche Ausführung keine erfolgreichen Tests behaupten.

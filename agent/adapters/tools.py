@@ -47,7 +47,7 @@ class ToolRegistry:
             return ToolResult(False, str(exc))
 
 
-def workspace_tools(workspace, *, enhanced=True, test_runner=None):
+def workspace_tools(workspace, *, enhanced=True, test_runner=None, lint_runner=None, lint_fix_runner=None):
     registry = ToolRegistry()
     for specification in FILE_TOOLS:
         if specification.name == "write_file" and not workspace.allow_write:
@@ -72,4 +72,10 @@ def workspace_tools(workspace, *, enhanced=True, test_runner=None):
     if test_runner is not None:
         registry.register(spec("run_tests", "Run the user-configured test command. Check passed and exit_code.",
                                {}), test_runner.as_tool)
+    if lint_runner is not None:
+        registry.register(spec("run_lint", "Run the configured lint check. Check passed and exit_code.",
+                               {}), lint_runner.as_tool)
+    if lint_fix_runner is not None and workspace.allow_write:
+        registry.register(spec("run_lint_fix", "Run the configured fixer, then lint again. May edit files; rerun tests afterward.",
+                               {}), lint_fix_runner.as_tool)
     return registry

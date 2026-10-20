@@ -142,3 +142,18 @@ class RealPromptTests(unittest.TestCase):
             session = create_prompt_session(input=pipe, output=DummyOutput())
             pipe.send_text('/pl\t\r')
             self.assertEqual(session.prompt('> '), '/plan')
+
+
+class VerificationPromptTests(unittest.TestCase):
+    def test_each_verification_capability_is_visible_and_mode_gated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shell = InteractiveShell(Workspace(Path(directory), allow_write=True), lambda *args: None,
+                                     execution_enabled=True, lint_enabled=True, lint_fix_enabled=True,
+                                     output=lambda text: None)
+            self.assertIn('tests:off', shell.prompt)
+            self.assertIn('lint:off', shell.prompt)
+            self.assertIn('fixes:off', shell.prompt)
+            shell.handle('/implement')
+            self.assertIn('tests:on', shell.prompt)
+            self.assertIn('lint:on', shell.prompt)
+            self.assertIn('fixes:on', shell.prompt)

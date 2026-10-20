@@ -100,6 +100,23 @@ Endpoints. Ohne `--live` macht die Evaluation keine Modellaufrufe:
 python -m agent.evaluate --toolset both --output evaluation-report.json
 ```
 
+## Tests und Linting getrennt konfigurieren
+
+```bash
+pip install -e '.[dev,terminal]'
+coding-agent --provider ollama --model MODELLNAME --allow-write --allow-exec \
+  --test-command 'python -m unittest discover -s tests -v' \
+  --lint-command 'python -m ruff check .'
+```
+
+`run_tests` und `run_lint` liefern getrennte Resultate. Optional aktiviert
+`--lint-fix-command 'python -m ruff check --fix .'` einen eigenen Fixer;
+dieser benötigt `--allow-write` und prüft danach Lint erneut. Tests müssen nach
+Fixes ebenfalls erneut laufen. Im Planungsmodus sind alle drei Werkzeuge gesperrt.
+
+Ruff ist im Entwicklungs-Extra enthalten. Die Repository-CI führt Lint und Tests
+separat aus. Details: [Tests, Linting und optionale Fixes](docs/testing-and-linting.md).
+
 ## Architektur: Ports and Adapters
 
 Die [ausführliche Architekturdokumentation](docs/architecture.md) erläutert die

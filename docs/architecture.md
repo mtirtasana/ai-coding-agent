@@ -1,6 +1,6 @@
 # Architektur des generischen Coding-Agenten
 
-Diese Dokumentation beschreibt die implementierte Architektur der Version 0.5.
+Diese Dokumentation beschreibt die implementierte Architektur der Version 0.6.
 Sie richtet sich an Entwicklerinnen und Entwickler, die den Agenten verstehen,
 einen Modellanbieter ergänzen oder neue Werkzeuge anbinden möchten.
 
@@ -643,7 +643,7 @@ Die zusätzlichen Tests prüfen kompatible Chat-Übersetzungen, Suche, gezielte 
 Prozessgrenzen und den deterministischen vollständigen Reparaturzyklus. Die Evaluation
 prüft unabhängig vom Abschlusstext des Modells.
 
-Der dokumentierte Implementierungsstand besteht aus 81 erfolgreichen lokalen
+Der dokumentierte Implementierungsstand besteht aus 91 erfolgreichen lokalen
 Tests und einem ausgeführten Offline-CLI-Durchlauf. Das belegt die getesteten
 Verträge und Pfade, keine erfolgreiche Kommunikation mit echten Modellservern.
 Live-Tests, Kompatibilitätsprüfungen mehrerer Modelle und eine Überprüfung der
@@ -699,3 +699,12 @@ flowchart TD
     Eval --> Check[Unabhängiger Fixture-Checker]
     Check --> Report[Metadatenreport]
 ```
+
+## Getrennte Test- und Lint-Profile
+
+Version 0.6 generalisiert den lokalen Prozessadapter zu `LocalCommandRunner`;
+`LocalTestRunner` bleibt als kompatibler Alias erhalten. `run_tests`, `run_lint`
+und das explizit konfigurierte `run_lint_fix` haben getrennte Ergebnisse und
+werden durch denselben Modusfilter geschützt. Der Fixer prüft anschließend Lint
+und kennzeichnet Tests als erneut erforderlich. Ablauf, Limits und CI-Konfiguration
+stehen im [Leitfaden für Tests und Linting](testing-and-linting.md).

@@ -226,3 +226,10 @@ shows `tests:on/off` separately from file-edit permission. Planning always has
 tests off. Process execution has host access and can modify files even when
 file-write tools are disabled. `/implement` still switches and waits; it never
 starts tests automatically.
+
+## Version 0.6: separate lint status
+
+The prompt also shows `lint:on/off` and `fixes:on/off`. Execution can be configured
+for tests, lint, or both. Planning mode blocks every verification process.
+See [Tests and linting](testing-and-linting.md) for independent command setup and
+opt-in fixes. Slash commands and explicit plan acceptance are unchanged.

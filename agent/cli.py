@@ -29,10 +29,14 @@ def main():
     parser.add_argument("--context-mode", choices=["recent", "full"], default="recent",
                         help="recent: neueste vollständige Runden; full: gesamte Historie")
     parser.add_argument("--allow-write", action="store_true")
-    parser.add_argument("--allow-exec", action="store_true", help="Enable the configured LOCAL test command")
+    parser.add_argument("--allow-exec", action="store_true", help="Enable configured LOCAL test/lint commands")
     parser.add_argument("--test-command", help="Explicit command, split into arguments; no shell evaluation")
     parser.add_argument("--test-timeout", type=float, default=60)
     parser.add_argument("--test-output-bytes", type=int, default=65536)
+    parser.add_argument("--lint-command", help="Separate explicitly configured lint check (no shell evaluation)")
+    parser.add_argument("--lint-fix-command", help="Optional fixer; requires --lint-command and --allow-write")
+    parser.add_argument("--lint-timeout", type=float, default=60)
+    parser.add_argument("--lint-output-bytes", type=int, default=65536)
     parser.add_argument("--verbose", action="store_true", help="JSONL-Ereignisse auf stderr")
     args = parser.parse_args()
     if args.max_steps < 1 or args.max_context_chars < 1:
@@ -44,15 +48,25 @@ def main():
     if args.provider == "openai-compatible" and (
             not args.model or not args.base_url or not os.getenv(args.api_key_env)):
         parser.error("Compatible provider requires --model, --base-url and the selected API-key environment variable.")
-    if args.allow_exec != bool(args.test_command):
-        parser.error("Local test execution requires both --allow-exec and --test-command.")
+    if args.allow_exec != any((args.test_command, args.lint_command, args.lint_fix_command)):
+        parser.error("Local verification requires --allow-exec and at least one test/lint command.")
+    if args.lint_fix_command and (not args.lint_command or not args.allow_write):
+        parser.error("Lint fixes require --lint-command and --allow-write.")
     try:
         workspace = Workspace(args.workspace, args.allow_write)
-        runner = None
+        runner = lint_runner = lint_fix_runner = None
         if args.allow_exec:
-            from agent.adapters.execution import LocalTestRunner
-            runner = LocalTestRunner(workspace.root, shlex.split(args.test_command),
-                                     args.test_timeout, args.test_output_bytes)
+            from agent.adapters.execution import LocalCommandRunner, LintFixRunner
+            if args.test_command:
+                runner = LocalCommandRunner(workspace.root, shlex.split(args.test_command),
+                                            args.test_timeout, args.test_output_bytes, check='test')
+            if args.lint_command:
+                lint_runner = LocalCommandRunner(workspace.root, shlex.split(args.lint_command),
+                                                 args.lint_timeout, args.lint_output_bytes, check='lint')
+            if args.lint_fix_command:
+                fixer = LocalCommandRunner(workspace.root, shlex.split(args.lint_fix_command),
+                                           args.lint_timeout, args.lint_output_bytes, check='lint_fix')
+                lint_fix_runner = LintFixRunner(fixer, lint_runner)
         mode = args.mode or ("plan" if args.task is None else "implement")
         # Check the terminal dependency before creating SDK clients.
         session = None
@@ -70,14 +84,17 @@ def main():
             model = DemoProvider()
 
         def agent_factory(current_mode, rules):
-            return Agent(model, workspace_tools(workspace, test_runner=runner),
+            return Agent(model, workspace_tools(workspace, test_runner=runner,
+                                               lint_runner=lint_runner, lint_fix_runner=lint_fix_runner),
                          JsonlEventSink(sys.stderr) if args.verbose else None,
                          max_steps=args.max_steps, max_context_chars=args.max_context_chars,
                          context_builder=RuleBasedContextBuilder(args.context_mode),
                          mode=current_mode, project_instructions=rules)
 
         if session is not None:
-            InteractiveShell(workspace, agent_factory, mode=mode, execution_enabled=runner is not None).run(session)
+            InteractiveShell(workspace, agent_factory, mode=mode, execution_enabled=runner is not None,
+                             lint_enabled=lint_runner is not None,
+                             lint_fix_enabled=lint_fix_runner is not None).run(session)
         else:
             print(agent_factory(mode, instructions.content).run(args.task).text)
     except KeyboardInterrupt:
