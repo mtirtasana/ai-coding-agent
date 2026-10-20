@@ -47,6 +47,9 @@ Fallback für den OpenAI-Adapter unterstützt.
 Die [ausführliche Architekturdokumentation](docs/architecture.md) erläutert die
 Komponenten, Design Patterns, Datenflüsse und Erweiterungspunkte mit Diagrammen.
 
+Ein separater [Architekturvorschlag für Kontextverwaltung und SQLite](docs/context-and-persistence.md)
+beschreibt Datenmodell, Cache-Invalidierung und Tokenbudgetierung. Er ist noch nicht implementiert.
+
 ```mermaid
 flowchart TD
     CLI[CLI: Composition Root] --> Agent[Agent-Kern]

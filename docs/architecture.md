@@ -570,3 +570,9 @@ Werkzeugverträge, Prozesslimits und Fehlerbehandlung angepasst werden.
 Git-Funktionen, Container-Workspaces und ein Anthropic-Adapter können danach an
 den vorhandenen Grenzen ergänzt werden. Multi-Agent-Orchestrierung ist kein
 Bestandteil des Grundgerüsts und sollte erst bei konkretem Bedarf hinzukommen.
+
+## Weiterführender Architekturvorschlag
+
+Der [Vorschlag für Kontextverwaltung und SQLite-Persistenz](context-and-persistence.md)
+beschreibt einen möglichen nächsten Ausbau mit Speicher-Ports, Kontextbudget,
+Datenmodell und Cache-Invalidierung. Diese Erweiterungen sind noch nicht implementiert.
