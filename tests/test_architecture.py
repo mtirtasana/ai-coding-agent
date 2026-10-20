@@ -51,7 +51,7 @@ class ArchitectureTests(unittest.TestCase):
         messages = [Message("assistant", tool_calls=(
             ToolCall("a", "read_file", '{"path":"test.txt"}'),)),
             Message("tool", '{"ok":true,"content":"hello"}', call_id="a")]
-        with patch("urllib.request.urlopen", return_value=response) as send:
+        with patch("urllib.request.OpenerDirector.open", return_value=response) as send:
             result = OllamaProvider("local").generate(messages, [])
             payload = json.loads(send.call_args.args[0].data)
         self.assertEqual(payload["messages"][-1]["tool_name"], "read_file")
@@ -102,7 +102,7 @@ class ArchitectureTests(unittest.TestCase):
         import io
         response = io.BytesIO(json.dumps({"message": {"content": "", "tool_calls": [
             {"function": {"name": "list_files", "arguments": {"path": "."}}}]}}).encode())
-        with patch("urllib.request.urlopen", return_value=response) as send:
+        with patch("urllib.request.OpenerDirector.open", return_value=response) as send:
             result = OllamaProvider("local").generate([Message("user", "task")],
                                                        self.tools.specifications())
             payload = json.loads(send.call_args.args[0].data)

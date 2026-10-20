@@ -219,3 +219,11 @@ container isolation, and Git automation remain future work.
 flags remain compatible. Dedicated `run_lint` and opt-in `run_lint_fix` are
 documented in [Tests and linting](testing-and-linting.md). The fixer automatically
 rechecks lint; behavioral tests must be rerun separately.
+
+
+## Security profiles (v0.7)
+
+Separate `run_security` and `run_dependency_audit` tools reuse the bounded command
+runner and require explicit commands plus `--allow-exec`. Planning blocks both.
+The prompt adds effective `security:on/off` and `audit:on/off` indicators.
+See [Security checks](security-checks.md) for setup, CI, results and limitations.

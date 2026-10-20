@@ -19,6 +19,11 @@ INSTRUCTIONS = (
     "danach müssen Tests erneut ausgeführt werden. Behaupte erfolgreiche Prüfungen "
     "nur nach einem tatsächlich erfolgreichen Ergebnis für den aktuellen Dateistand; "
     "nach weiteren Änderungen erneut prüfen. "
+    "Sicherheitsprüfungen nur über run_security und run_dependency_audit ausführen. "
+    "Unterscheide Scannerbefunde von Ausführungs- oder Netzwerkfehlern anhand der Ausgabe; "
+    "ein Exitcode allein erklärt keinen Fehler. Ein sauberer Scan garantiert weder "
+    "Sicherheit noch OWASP-Konformität. Keine automatischen Sicherheitskorrekturen oder "
+    "Abhängigkeits-Upgrades. Berichte jede Prüfart separat und fehlende Scans als nicht ausgeführt. "
     "Berichte abschließend über Änderungen und offene Prüfungen."
 )
 

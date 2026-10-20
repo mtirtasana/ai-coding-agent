@@ -1,6 +1,6 @@
 # Architektur des generischen Coding-Agenten
 
-Diese Dokumentation beschreibt die implementierte Architektur der Version 0.6.
+Diese Dokumentation beschreibt die implementierte Architektur der Version 0.7.
 Sie richtet sich an Entwicklerinnen und Entwickler, die den Agenten verstehen,
 einen Modellanbieter ergänzen oder neue Werkzeuge anbinden möchten.
 
@@ -643,7 +643,7 @@ Die zusätzlichen Tests prüfen kompatible Chat-Übersetzungen, Suche, gezielte 
 Prozessgrenzen und den deterministischen vollständigen Reparaturzyklus. Die Evaluation
 prüft unabhängig vom Abschlusstext des Modells.
 
-Der dokumentierte Implementierungsstand besteht aus 91 erfolgreichen lokalen
+Der dokumentierte Implementierungsstand besteht aus 100 erfolgreichen lokalen
 Tests und einem ausgeführten Offline-CLI-Durchlauf. Das belegt die getesteten
 Verträge und Pfade, keine erfolgreiche Kommunikation mit echten Modellservern.
 Live-Tests, Kompatibilitätsprüfungen mehrerer Modelle und eine Überprüfung der
@@ -708,3 +708,19 @@ und das explizit konfigurierte `run_lint_fix` haben getrennte Ergebnisse und
 werden durch denselben Modusfilter geschützt. Der Fixer prüft anschließend Lint
 und kennzeichnet Tests als erneut erforderlich. Ablauf, Limits und CI-Konfiguration
 stehen im [Leitfaden für Tests und Linting](testing-and-linting.md).
+
+
+## Security-Erweiterung (Version 0.7)
+
+`LocalCommandRunner` unterstützt zusätzlich die Profile `security` und
+`dependency_audit`. Die CLI konfiguriert sie unabhängig; die Registry bietet
+`run_security` und `run_dependency_audit` ohne Argumente an. `ModeToolExecutor`
+sperrt beide im Planungsmodus. Limits und Ergebnisfelder entsprechen dem
+Test-/Lint-Adapter. Terminal und Modell unterscheiden diese Prüfarten;
+ein erfolgreicher Scan ist keine Sicherheitsgarantie.
+
+Die [Security-Dokumentation](security-checks.md) enthält das Komponentendiagramm,
+CLI-Verträge, CI-Aufteilung, Audit-Abdeckung und die einzeln begründeten
+Bandit-Ausnahmen. Der Ollama-Adapter erlaubt nur HTTP(S)-Endpunkte ohne eingebettete
+Zugangsdaten, Query oder Fragment und lehnt Weiterleitungen ab. Bandit und
+pip-audit sind optionale Werkzeuge, keine Abhängigkeiten des Agent-Kerns.

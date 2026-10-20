@@ -29,7 +29,7 @@ class UsageTests(unittest.TestCase):
 
     def ollama(self, **fields):
         response = io.BytesIO(json.dumps({"message": {"content": "Done"}, **fields}).encode())
-        with patch("urllib.request.urlopen", return_value=response):
+        with patch("urllib.request.OpenerDirector.open", return_value=response):
             return OllamaProvider("test").generate([Message("user", "Task")], [])
 
     def test_ollama_usage(self):
@@ -43,7 +43,7 @@ class UsageTests(unittest.TestCase):
             payload = {"message": {"tool_calls": [{"function": {
                 "name": "read_file", "arguments": {"path": "test.txt"}}}]}}
             response = io.BytesIO(json.dumps(payload).encode())
-            with patch("urllib.request.urlopen", return_value=response):
+            with patch("urllib.request.OpenerDirector.open", return_value=response):
                 result = OllamaProvider("test").generate([Message("user", "Task")], [])
                 ids.append(result.message.tool_calls[0].id)
         self.assertNotEqual(*ids)

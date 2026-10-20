@@ -47,7 +47,8 @@ class ToolRegistry:
             return ToolResult(False, str(exc))
 
 
-def workspace_tools(workspace, *, enhanced=True, test_runner=None, lint_runner=None, lint_fix_runner=None):
+def workspace_tools(workspace, *, enhanced=True, test_runner=None, lint_runner=None, lint_fix_runner=None,
+                    security_runner=None, dependency_audit_runner=None):
     registry = ToolRegistry()
     for specification in FILE_TOOLS:
         if specification.name == "write_file" and not workspace.allow_write:
@@ -78,4 +79,11 @@ def workspace_tools(workspace, *, enhanced=True, test_runner=None, lint_runner=N
     if lint_fix_runner is not None and workspace.allow_write:
         registry.register(spec("run_lint_fix", "Run the configured fixer, then lint again. May edit files; rerun tests afterward.",
                                {}), lint_fix_runner.as_tool)
+    for name, runner, description in (
+        ('run_security', security_runner, 'Run the configured static security check.'),
+        ('run_dependency_audit', dependency_audit_runner, 'Run the configured dependency vulnerability audit; may access the network.'),
+    ):
+        if runner is not None:
+            registry.register(spec(name, description + ' Check passed, exit_code and output; a pass is not a safety guarantee.',
+                                   {}), runner.as_tool)
     return registry

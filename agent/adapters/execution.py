@@ -3,7 +3,8 @@ import json
 import math
 import os
 import signal
-import subprocess
+# Explicit host-command adapter; see docs/security-checks.md.
+import subprocess  # nosec B404
 import threading
 import time
 from pathlib import Path
@@ -22,7 +23,7 @@ class LocalCommandRunner:
         if not math.isfinite(timeout) or timeout <= 0 or type(output_limit) is not int or output_limit < 1:
             raise ValueError("Timeout and output limit must be positive and finite.")
         self.command, self.timeout, self.output_limit = tuple(command), timeout, output_limit
-        if check not in {'test', 'lint', 'lint_fix'}:
+        if check not in {'test', 'lint', 'lint_fix', 'security', 'dependency_audit'}:
             raise ValueError('Unknown verification profile.')
         self.check = check
 
@@ -30,8 +31,10 @@ class LocalCommandRunner:
     def _stop(process):
         if os.name == 'nt':
             try:
-                subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                # Resolve the fixed OS utility independently of the workspace/PATH.
+                taskkill = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'taskkill.exe'
+                subprocess.run([str(taskkill), '/PID', str(process.pid), '/T', '/F'],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)  # nosec B603
             except (OSError, subprocess.TimeoutExpired):
                 pass
             if process.poll() is None:
@@ -44,7 +47,8 @@ class LocalCommandRunner:
 
     def run(self):
         started = time.monotonic()
-        process = subprocess.Popen(self.command, cwd=self.root, stdin=subprocess.DEVNULL,
+        # Only host-configured argv reaches this call; model tools cannot supply commands.
+        process = subprocess.Popen(self.command, cwd=self.root, stdin=subprocess.DEVNULL,  # nosec B603
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False,
                                    start_new_session=os.name != 'nt',
                                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)

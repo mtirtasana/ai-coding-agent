@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-coding-agent-starter"
-version = "0.6.0"
+version = "0.7.0"
 description = "Ein kleiner KI-Coding-Agent mit dateibasierten Werkzeugen"
 requires-python = ">=3.11"
 dependencies = []
@@ -13,6 +13,7 @@ dependencies = []
 openai = ["openai>=1.66,<3"]
 terminal = ["prompt-toolkit>=3.0,<4"]
 dev = ["ruff>=0.9,<1"]
+security = ["bandit[toml]>=1.8,<2", "pip-audit>=2.9,<3"]
 
 [project.scripts]
 coding-agent = "agent.cli:main"

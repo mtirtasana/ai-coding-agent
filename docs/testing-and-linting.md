@@ -154,3 +154,11 @@ planning denial, fix permission requirements, automatic lint recheck, fixer
 failure/timeout, command-argument rejection, CLI setup, and prompt indicators.
 A manual smoke check with the installed Ruff additionally verifies an actual
 unused-import failure, fix, and clean recheck.
+
+
+## Security profiles (v0.7)
+
+Separate `run_security` and `run_dependency_audit` tools reuse the bounded command
+runner and require explicit commands plus `--allow-exec`. Planning blocks both.
+The prompt adds effective `security:on/off` and `audit:on/off` indicators.
+See [Security checks](security-checks.md) for setup, CI, results and limitations.

@@ -50,11 +50,21 @@ class OllamaProvider:
     """Lokale Ollama Chat API mit Werkzeugaufrufen; nur Standardbibliothek."""
     def __init__(self, model: str, base_url: str = "http://localhost:11434",
                  timeout: float = 120):
+        from urllib.parse import urlsplit
+        url = urlsplit(base_url)
+        if (url.scheme not in {"http", "https"} or not url.hostname
+                or url.username or url.password or url.query or url.fragment):
+            raise ValueError("Base URL must be HTTP(S), without credentials, query or fragment.")
         self.model, self.base_url, self.timeout = model, base_url.rstrip("/"), timeout
 
     def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse:
         import json
-        from urllib.request import Request, urlopen
+        from urllib.request import Request, build_opener, HTTPRedirectHandler
+
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                raise ValueError("Ollama endpoint redirects are not supported.")
+
         items = []
         names = {}
         for message in messages:
@@ -72,7 +82,7 @@ class OllamaProvider:
                        "parameters": t.parameters}} for t in tools]}
         request = Request(self.base_url + "/api/chat", data=json.dumps(payload).encode(),
                           headers={"Content-Type": "application/json"})
-        with urlopen(request, timeout=self.timeout) as response:
+        with build_opener(NoRedirect()).open(request, timeout=self.timeout) as response:
             payload = json.load(response)
         result = payload["message"]
         # Selected history can have the same length in successive requests.

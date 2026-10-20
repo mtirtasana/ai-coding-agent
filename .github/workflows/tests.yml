@@ -15,3 +15,25 @@ jobs:
         run: python -m ruff check .
       - name: Tests
         run: python -m unittest discover -s tests -v
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e '.[security]'
+      - name: Static security analysis
+        run: python -m bandit -r agent
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Update audit environment installer
+        run: python -m pip install --upgrade pip
+      - run: pip install -e '.[openai,terminal,dev,security]'
+      - name: Audit installed dependencies
+        run: python -m pip_audit --skip-editable

@@ -223,3 +223,17 @@ Tests benötigen weder SDKs noch API-Schlüssel. Sie prüfen Pfadgrenzen,
 Werkzeugvalidierung, den Agent-Zyklus, Limits, Fehlerweitergabe und Übersetzungen
 beider Modelladapter mit simulierten Antworten. Live-Tests gegen Modellserver
 müssen separat erfolgen.
+
+## Sicherheitsprüfungen
+
+Das Extra `.[security]` installiert Bandit und pip-audit. Mit `--allow-exec`,
+`--security-command 'python -m bandit -r agent'` und
+`--dependency-audit-command 'python -m pip_audit --skip-editable'` lassen sich
+beide Prüfarten unabhängig aktivieren. Im Planungsmodus sind sie gesperrt.
+CI führt statische Analyse und Abhängigkeitsprüfung in eigenen Jobs aus.
+
+Die [Security-Dokumentation](docs/security-checks.md) erklärt Einrichtung,
+Datenfluss, Grenzen, OWASP-Bezug und die begründeten Bandit-Ausnahmen.
+Saubere Scans garantieren keine Sicherheit; automatische Sicherheitsfixes oder
+Abhängigkeits-Upgrades durch den Agenten sind nicht vorgesehen. Ollama-Endpunkte
+müssen HTTP(S) verwenden; Weiterleitungen werden abgelehnt.

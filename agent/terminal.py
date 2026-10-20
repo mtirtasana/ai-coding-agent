@@ -56,13 +56,14 @@ def create_prompt_session(**kwargs):
 
 class InteractiveShell:
     def __init__(self, workspace, agent_factory, mode="plan", output=print, execution_enabled=False,
-                 lint_enabled=False, lint_fix_enabled=False):
+                 lint_enabled=False, lint_fix_enabled=False, security_enabled=False, audit_enabled=False):
         if mode not in {"plan", "implement"}:
             raise ValueError("Mode must be plan or implement.")
         self.workspace, self.agent_factory, self.mode = workspace, agent_factory, mode
         self.output = output
         self.execution_enabled = execution_enabled
         self.lint_enabled, self.lint_fix_enabled = lint_enabled, lint_fix_enabled
+        self.security_enabled, self.audit_enabled = security_enabled, audit_enabled
         self.state = ConversationState()
         self.instructions = load_project_instructions(workspace)
 
@@ -75,8 +76,10 @@ class InteractiveShell:
         tests = 'on' if self.execution_enabled and self.mode == 'implement' else 'off'
         lint = 'on' if self.lint_enabled and self.mode == 'implement' else 'off'
         fixes = 'on' if self.lint_fix_enabled and self.writable else 'off'
+        security = 'on' if self.security_enabled and self.mode == 'implement' else 'off'
+        audit = 'on' if self.audit_enabled and self.mode == 'implement' else 'off'
         return (f"[{self.mode} | {'write' if self.writable else 'read-only'} | tests:{tests} "
-                f"| lint:{lint} | fixes:{fixes}] > ")
+                f"| lint:{lint} | fixes:{fixes} | security:{security} | audit:{audit}] > ")
 
     def submit(self, task):
         try:

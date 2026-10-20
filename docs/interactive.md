@@ -233,3 +233,11 @@ The prompt also shows `lint:on/off` and `fixes:on/off`. Execution can be configu
 for tests, lint, or both. Planning mode blocks every verification process.
 See [Tests and linting](testing-and-linting.md) for independent command setup and
 opt-in fixes. Slash commands and explicit plan acceptance are unchanged.
+
+
+## Security profiles (v0.7)
+
+Separate `run_security` and `run_dependency_audit` tools reuse the bounded command
+runner and require explicit commands plus `--allow-exec`. Planning blocks both.
+The prompt adds effective `security:on/off` and `audit:on/off` indicators.
+See [Security checks](security-checks.md) for setup, CI, results and limitations.
