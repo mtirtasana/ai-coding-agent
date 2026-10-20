@@ -1,6 +1,6 @@
 # Vorschlag: Kontextverwaltung und SQLite-Persistenz
 
-**Status: teilweise umgesetzt, Stand Version 0.4.** Die regelbasierte Kontextauswahl
+**Status: teilweise umgesetzt; mit Version 0.7 und ADR-0012 abgeglichen.** Die regelbasierte Kontextauswahl
 (`recent`/`full`), Auswahlstatistiken und optionale Anbieter-Tokenwerte sind implementiert.
 Mehrteilige Konversation, Plan-/Implementierungsmodus und angeheftete Root-Regeln
 sind ebenfalls umgesetzt. SQLite, Speicher-Ports, Cache, Zusammenfassungen,
@@ -8,12 +8,16 @@ TokenEstimator und relevante Dateiausschnitte sind weiterhin Vorschläge. Die fo
 bewusst die aktuelle Basis vom geplanten Ausbau; das SQL ist keine Migration.
 Details zum aktuellen Verhalten stehen in der [Architekturdokumentation](architecture.md).
 
+Siehe auch [ADR-0012: Persistenz und Caching zurückstellen](adr/0012-defer-persistence-and-caching.md)
+für die aktuelle Entscheidung, die Implementierung weiterhin zurückzustellen.
+
 ## Entscheidung
 
 SQLite ist für diesen Agenten als lokaler Sitzungs- und Artefaktspeicher sinnvoll.
 Tokenverbrauch reduziert jedoch erst eine gezielte Kontextauswahl. Der nächste
 Schritt nach dem vorhandenen regelbasierten ContextBuilder sollte deshalb
-die Messergebnisse auswerten und SQLite hinter austauschbaren Speicher-Ports anbinden.
+die Messergebnisse auswerten. SQLite hinter austauschbaren Speicher-Ports ist
+eine Option, wenn konkrete Anforderungen den zusätzlichen Aufwand rechtfertigen.
 
 Empfohlene Reihenfolge:
 
@@ -415,5 +419,7 @@ Vor einer Implementierungsfreigabe sind folgende Tests vorzusehen:
 - Sitzungsdatenbank ist über Workspace-Werkzeuge nicht zugänglich.
 
 Der erste Schritt ist mit einem regelbasierten ContextBuilder und einer Historie
-im Arbeitsspeicher umgesetzt. SQLite-Persistenz folgt als austauschbarer Adapter. Diese Reihenfolge adressiert zuerst den Tokenverbrauch und verhindert,
+im Arbeitsspeicher umgesetzt. SQLite-Persistenz bleibt als austauschbarer Adapter
+zurückgestellt, bis Bedarf und Messungen sie rechtfertigen. Diese Reihenfolge
+adressiert zuerst den Tokenverbrauch und verhindert,
 dass ein Speicherlayer ohne messbaren Nutzen zum Zentrum der Architektur wird.

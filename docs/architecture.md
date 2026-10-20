@@ -4,6 +4,10 @@ Diese Dokumentation beschreibt die implementierte Architektur der Version 0.7.
 Sie richtet sich an Entwicklerinnen und Entwickler, die den Agenten verstehen,
 einen Modellanbieter ergänzen oder neue Werkzeuge anbinden möchten.
 
+Die englische [Komponentenreferenz](components.md) ergänzt diese Darstellung um
+formale Verträge, wissenschaftliche Einordnung und eine Evidenzmatrix.
+Die [ADRs](adr/README.md) dokumentieren Entscheidungen, Alternativen und Folgen.
+
 ## Inhaltsverzeichnis
 
 1. [Ziele und Umfang](#ziele-und-umfang)
@@ -323,8 +327,9 @@ importiert. Deshalb laufen Kern, Demo und Ollama ohne SDK-Installation. Tests
 können einen simulierten Client übergeben.
 
 Die Abbildung umfasst aktuell Text und Werkzeugaufrufe. Bilder, Streaming,
-anbieterspezifische Reasoning-Elemente, Nutzungsstatistiken und andere spezialisierte
-Ausgabearten werden nicht als eigene interne Datentypen erhalten. Unterstützung
+anbieterspezifische Reasoning-Elemente und andere spezialisierte Ausgabearten
+werden nicht als eigene interne Datentypen erhalten. Tatsächlich gemeldete
+Nutzungsstatistiken werden dagegen in `ModelUsage` erhalten. Unterstützung
 für beliebige Modellfamilien ist damit nicht durch die Architektur allein garantiert.
 
 ### OllamaProvider
@@ -661,7 +666,7 @@ inhaltlichen Coding-Ergebnisse bleiben separate Aufgaben.
 | OpenAI als optionale Abhängigkeit | Lokaler Betrieb ohne Cloud-SDK | OpenAI muss separat installiert werden |
 | Regelbasierte Kontextauswahl | Weniger wiederholte Inhalte bei unveränderter Historie | Ältere Informationen können dem Modell fehlen |
 | Expliziter Abbruch bei zu großem Pflichtkontext | Keine unvollständigen Werkzeugrunden | Große Einzelrunden benötigen weiterhin kleinere Aufgaben |
-| Vollständige Dateien statt Patches | Kleiner erster Werkzeugsatz | Unbeabsichtigte Überschreibungen sind möglich |
+| Hashgeprüfte Textersetzung neben vollständigem Schreiben | Kleine Änderungen und veraltete Snapshots erkennen | `write_file` bleibt für neue Dateien/Kompatibilität; keine allgemeine Patch-Engine |
 | Metadaten statt vollständiger Gesprächslogs | Kleine, einfache Ereignisausgabe | Keine automatische Wiederaufnahme oder vollständige Rekonstruktion |
 
 Gezielte Textersetzung und begrenzte lokale Testprozesse sind in Version 0.5

@@ -122,6 +122,12 @@ separat aus. Details: [Tests, Linting und optionale Fixes](docs/testing-and-lint
 Die [ausführliche Architekturdokumentation](docs/architecture.md) erläutert die
 Komponenten, Design Patterns, Datenflüsse und Erweiterungspunkte mit Diagrammen.
 
+Die neue englische [Komponentenreferenz](docs/components.md) erklärt Verträge,
+Algorithmen, Fehlerfälle, formale Modelle und wissenschaftliche Aussagegrenzen.
+Die [12 Architecture Decision Records](docs/adr/README.md) dokumentieren Gründe,
+Alternativen, Konsequenzen und Kriterien für spätere Änderungen.
+Der [Dokumentationsindex](docs/README.md) bietet passende Lesepfade.
+
 Ein separater [Architekturvorschlag für Kontextverwaltung und SQLite](docs/context-and-persistence.md)
 beschreibt Datenmodell, Cache-Invalidierung und weitere Ausbaustufen. Regelbasierte
 Kontextauswahl und Messung sind implementiert; SQLite, Cache und Zusammenfassungen noch nicht.
@@ -171,8 +177,9 @@ bei anderen Argumenttypen als Strings muss die Validierung erweitert werden.
 
 ## Grenzen des Grundgerüsts
 
-Standardmäßig sind nur `list_files` und `read_file` verfügbar. `--allow-write`
-schaltet `write_file` hinzu; dabei können Dateien vollständig ersetzt werden.
+Standardmäßig sind `list_files`, `read_file`, `search_text`, `file_snapshot` und
+`preview_edit` verfügbar. `--allow-write` schaltet in `implement` zusätzlich
+`write_file` und `apply_edit` frei; `write_file` ersetzt den vollständigen Inhalt.
 Gezielte Textersetzung und konfigurierte Testprozesse sind vorhanden. Allgemeine
 Patch-Anwendung, Git-Werkzeuge, Container-Isolation, Anthropic-Adapter und automatische
 relevanzbasierte Auswahl von Dateiabschnitten sind noch nicht implementiert.
@@ -221,7 +228,7 @@ python -m unittest discover -s tests -v
 
 Tests benötigen weder SDKs noch API-Schlüssel. Sie prüfen Pfadgrenzen,
 Werkzeugvalidierung, den Agent-Zyklus, Limits, Fehlerweitergabe und Übersetzungen
-beider Modelladapter mit simulierten Antworten. Live-Tests gegen Modellserver
+der Modelladapter mit simulierten Antworten. Live-Tests gegen Modellserver
 müssen separat erfolgen.
 
 ## Sicherheitsprüfungen
