@@ -1,69 +1,107 @@
-# KI Coding Agent
+# Generischer KI-Coding-Agent
 
-Ein Python-Starter für einen eigenen KI-Coding-Agenten mit der OpenAI Responses API.
-Er untersucht Projektdateien, plant Änderungen im Modell und kann UTF-8-Dateien
-erstellen oder ersetzen. Standardmäßig arbeitet er nur lesend.
+Ein Python-Grundgerüst mit einem anbieterunabhängigen Agent-Kern. Modelle und
+Werkzeuge werden über Schnittstellen eingebunden. Keine ChatGPT-Mitgliedschaft
+nötig. Python 3.11 oder neuer ist erforderlich.
 
-## Start
-
-Voraussetzungen: Python 3.11+, ein OpenAI-API-Schlüssel und Zugriff auf das gewählte
-Modell. Die API wird separat von einem ChatGPT-Abonnement abgerechnet.
+## Schnellstart ohne API oder Modell
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-# Schlüssel verdeckt einlesen (Bash):
-read -rsp 'OpenAI API key: ' OPENAI_API_KEY
-export OPENAI_API_KEY
-echo
-coding-agent "Erkläre den Projektaufbau" --workspace ./
-coding-agent "Ergänze eine Funktion zum Addieren" --workspace ./ --allow-write
+coding-agent "Projekt untersuchen" --provider demo --workspace . --verbose
 ```
 
-Unter Windows die virtuelle Umgebung mit `.venv\Scripts\Activate.ps1` aktivieren
-und `OPENAI_API_KEY` in der PowerShell-Umgebung setzen.
+Die Demo führt deterministisch einen Verzeichnisaufruf aus. Sie ist kein KI-Modell.
+Unter Windows die Umgebung mit `.venv\Scripts\Activate.ps1` aktivieren.
 
-Mit `--model` oder `OPENAI_MODEL` lässt sich das Modell wechseln; Standard ist
-`gpt-4.1`. `--max-steps 15` begrenzt die Anzahl der Modellaufrufe. Das ist keine
-feste Kostenobergrenze. Gelesene Dateien werden an die OpenAI-API gesendet.
+## Lokales Modell mit Ollama
 
-## Funktionsumfang und Grenzen
+Ollama separat installieren, den Server starten und ein Modell mit Unterstützung
+für Tool Calling herunterladen. Den tatsächlichen installierten Modellnamen angeben:
 
-- Werkzeuge: `list_files`, `read_file`, `write_file`.
-- Schreibzugriff erfordert `--allow-write` und kann bestehende Dateien ersetzen.
-- Aufgelöste Dateipfade müssen innerhalb des gewählten Workspace liegen.
-- `.git`, `.ssh`, `.aws` und Namen beginnend mit `.env` sind gesperrt.
-- Der Agent führt keine Shell-Befehle oder Tests aus und erstellt keine Commits.
-- Pfadprüfungen sind keine Betriebssystem-Sandbox. Nutze eine isolierte
-  Arbeitskopie ohne Geheimnisse; beliebige andere Dateien im Workspace können
-  gelesen werden. Gleichzeitige Änderungen an Symlinks sind nicht abgesichert.
-- Bei einem API-Fehler oder Schrittlimit bleiben bereits geschriebene Änderungen
-  bestehen. Änderungen anschließend mit `git diff` prüfen.
+```bash
+coding-agent "Erkläre den Projektaufbau" --provider ollama --model MODELLNAME --workspace .
+```
 
-## Tests
+Mit `--base-url http://localhost:11434` lässt sich die Serveradresse ändern.
+Modellqualität und Werkzeugunterstützung hängen vom ausgewählten Modell ab.
 
-Die lokalen Werkzeugtests benötigen keinen API-Schlüssel und keine Zusatzpakete:
+## OpenAI (optional)
+
+```bash
+pip install -e '.[openai]'
+read -rsp 'OpenAI API key: ' OPENAI_API_KEY
+export OPENAI_API_KEY
+coding-agent "Erkläre den Projektaufbau" --provider openai --model gpt-4.1
+```
+
+API-Nutzung wird separat abgerechnet. Der Kern benötigt weder das OpenAI-SDK noch
+Zugangsdaten. Standardanbieter ist für bestehende Aufrufe weiterhin `openai`.
+`AGENT_PROVIDER` und `AGENT_MODEL` setzen Defaults; `OPENAI_MODEL` bleibt als
+Fallback für den OpenAI-Adapter unterstützt.
+
+## Architektur: Ports and Adapters
+
+```mermaid
+flowchart TD
+    CLI[CLI: Composition Root] --> Agent[Agent-Kern]
+    Agent --> Model[ModelProvider-Port]
+    Model --> OpenAI[OpenAI-Adapter]
+    Model --> Ollama[Ollama-Adapter]
+    Model --> Demo[Offline-Demo]
+    Agent --> Tools[ToolExecutor-Port]
+    Tools --> Registry[ToolRegistry]
+    Registry --> Workspace[Lokaler Workspace]
+    Agent --> Events[EventSink-Port]
+    Events --> JSONL[JSONL-Ereignisse]
+```
+
+- `agent/core/types.py`: eigene Nachrichten, Aufrufe, Ergebnisse und Werkzeugschemas.
+- `agent/core/ports.py`: Python-Protokolle für Modelle, Werkzeuge und Ereignisse.
+- `agent/core/engine.py`: Beobachten → Modellentscheidung → Werkzeug → Ergebnis.
+- `agent/adapters/models.py`: Übersetzung zwischen internen Typen und Anbieterformaten.
+- `agent/adapters/tools.py`: Werkzeugregistrierung, String-Argumentvalidierung und Fehlerergebnisse.
+- `agent/files.py`: lokaler Workspace mit bestehenden Pfadbeschränkungen.
+- `agent/adapters/events.py`: JSONL-Metadaten ohne Prompts und Dateiinhalte.
+- `agent/cli.py`: wählt Adapter aus und verbindet sie mit dem Kern.
+
+Abhängigkeiten zeigen zum Kern. Der Kern kennt weder SDKs noch CLI, HTTP oder
+Dateisystem. Für einen neuen Anbieter `ModelProvider.generate(messages, tools)`
+implementieren und in der CLI auswählen lassen. Ein Provider muss interne
+Assistant-Nachrichten liefern und seine anbieterspezifischen Tool-Formate selbst
+übersetzen. Zusätzliche Werkzeuge werden mit `ToolSpec` und Handler registriert;
+bei anderen Argumenttypen als Strings muss die Validierung erweitert werden.
+
+## Grenzen des Grundgerüsts
+
+Standardmäßig sind nur `list_files` und `read_file` verfügbar. `--allow-write`
+schaltet `write_file` hinzu; dabei können Dateien vollständig ersetzt werden.
+Patch-Anwendung, Testprozesse, Git-Werkzeuge, Container-Isolation, Anthropic-Adapter
+und automatische Kontextauswahl sind noch nicht implementiert.
+
+`--max-steps 15` begrenzt Modellaufrufe. `--max-context-chars 200000` begrenzt den
+ungefähren Zeichenumfang vor dem nächsten Aufruf, keine Tokens oder Kosten.
+Bei Überschreitung wird abgebrochen; Historie wird nicht stillschweigend gekürzt.
+Bereits geschriebene Änderungen bleiben bei Abbruch oder API-Fehler bestehen.
+Jeder neue Lauf beginnt mit eigenem Kontext. `--verbose` schreibt Ereignisse
+auf stderr; diese können mit `2>events.jsonl` gespeichert werden.
+
+Aufgelöste Pfade müssen im Workspace liegen. `.git`, `.ssh`, `.aws` und Namen
+beginnend mit `.env` sind gesperrt. Das ist keine Betriebssystem-Sandbox und schützt
+nicht gegen gleichzeitig manipulierte Symlinks. Eine isolierte Arbeitskopie ohne
+Geheimnisse verwenden. Gelesene Inhalte werden an den gewählten Modellserver
+übermittelt. Änderungen mit `git diff` prüfen. Der Agent kann keine Tests ausführen
+und darf deshalb keine erfolgreiche Testausführung behaupten.
+
+## Entwicklung und Prüfungen
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-GitHub Actions führt dieselben Tests für Pushes und Pull Requests aus.
-Die Tests decken die Dateizugriffe ab; sie ersetzen keinen Live-Test mit dem Modell.
-
-## Repository verwenden
-
-```bash
-git clone https://github.com/mtirtasana/ai-coding-agent.git
-cd ai-coding-agent
-```
-
-Anschließend die Installation unter „Start“ ausführen. Für Codex das Repository
-in der Repository-Auswahl auswählen und eine Umgebung erstellen.
-
-## Aufbau
-
-`agent/cli.py` enthält die Kommandozeile und den Modell-Werkzeug-Zyklus.
-`agent/files.py` implementiert Dateizugriffe. `tests/` prüft die Grenzen dieser
-Werkzeuge. `AGENTS.md` enthält Hinweise für Codex und andere Coding-Agenten.
+Tests benötigen weder SDKs noch API-Schlüssel. Sie prüfen Pfadgrenzen,
+Werkzeugvalidierung, den Agent-Zyklus, Limits, Fehlerweitergabe und Übersetzungen
+beider Modelladapter mit simulierten Antworten. Live-Tests gegen Modellserver
+müssen separat erfolgen.
