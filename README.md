@@ -77,9 +77,13 @@ Fallback für den OpenAI-Adapter unterstützt.
 
 ## Suchen, gezielt ändern und Tests ausführen
 
-Der Agent kann mit `search_text` nach Literaltext suchen, per `file_snapshot`
-Dateiinhalte und Hash lesen und Änderungen mit `preview_edit`/`apply_edit`
+Der Agent kann mit `search_text` nach Literaltext suchen, per `read_file_range`
+relevante Zeilen samt vollständigem Datei-Hash lesen und bei Bedarf mit
+`file_snapshot` die ganze Datei abrufen. Änderungen lassen sich mit `preview_edit`/`apply_edit`
 gezielt vorbereiten und anwenden. Veraltete oder mehrdeutige Änderungen werden abgewiesen.
+Bereichsabrufe sind auf 200 Zeilen und 12.000 Inhaltszeichen begrenzt. Die
+[Dokumentation zur Tokeneffizienz](docs/token-efficiency.md) erklärt Grenzen,
+gepaarte Evaluation und gemessene Zeichenreduktionen samt Mehrkosten bei kleinen Dateien.
 
 ```bash
 coding-agent --provider ollama --model MODELLNAME --allow-write \

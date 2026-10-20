@@ -9,7 +9,43 @@ const {
   completionContext,
   sameStamp,
   providerKey,
+  lineRange,
 } = require("../dist/shared.cjs");
+test("line ranges preserve logical endings, Unicode and explicit empty/EOF metadata", () => {
+  for (const ending of ["\n", "\r\n", "\r"]) {
+    const text = `alpha${ending}😀 café${ending}last`;
+    assert.deepEqual(lineRange(text, 2, 200), {
+      start_line: 2,
+      end_line: 3,
+      total_lines: 3,
+      content: `😀 café${ending}last`,
+    });
+    assert.equal(lineRange(`one${ending}`, 1, 1).total_lines, 1);
+  }
+  assert.deepEqual(lineRange("", 1, 1), {
+    start_line: 0,
+    end_line: 0,
+    total_lines: 0,
+    content: "",
+  });
+  assert.equal(lineRange("\n\n", 2, 2).content, "\n");
+  assert.equal(lineRange("a\u2028b", 1, 1).total_lines, 1);
+  assert.equal([...lineRange("😀".repeat(12000), 1, 1).content].length, 12000);
+  assert.equal(lineRange("a\n".repeat(200), 1, 200).end_line, 200);
+  for (const [text, start, end] of [
+    ["", 2, 2],
+    ["one\n", 2, 2],
+    ["a", 0, 1],
+    ["a", 2, 1],
+    ["a", true, 1],
+    ["a", "1", 1],
+    ["a", 1, 1.5],
+    ["a", 1, Number.MAX_SAFE_INTEGER + 1],
+    ["a\n".repeat(300), 1, 201],
+    ["x".repeat(12001), 1, 1],
+  ])
+    assert.throws(() => lineRange(text, start, end));
+});
 test("path containment and protected components", () => {
   const root = path.resolve("fixture");
   for (const p of [

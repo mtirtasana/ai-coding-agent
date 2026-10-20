@@ -178,7 +178,7 @@ class Server:
                 raise ValueError('Invalid budget.')
         state = restore_state(params['checkpoint']) if 'checkpoint' in params else ConversationState()
         self.config, self.workspace, self.state = params, workspace, state
-        return {'protocolVersion': PROTOCOL_VERSION, 'backendVersion': '0.8.0'}
+        return {'protocolVersion': PROTOCOL_VERSION, 'backendVersion': '0.9.0'}
 
     def run(self, params):
         if set(params) != {'task', 'mode'} or not isinstance(params['task'], str) or not params['task'].strip():

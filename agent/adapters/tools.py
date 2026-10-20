@@ -1,6 +1,7 @@
 import json
 
 from agent.core.types import ToolResult, ToolSpec
+from .ranges import MAX_LINE_NUMBER
 
 
 def spec(name, description, properties, *, read_only=False):
@@ -38,9 +39,17 @@ class ToolRegistry:
             properties = specification.parameters["properties"]
             if not isinstance(args, dict) or set(args) != set(properties):
                 raise ValueError("Fehlende oder unbekannte Werkzeugargumente.")
-            # The initial tools accept strings only. Extend validation with new types.
-            if any(not isinstance(value, str) for value in args.values()):
-                raise ValueError("Werkzeugargumente müssen Strings sein.")
+            for name, value in args.items():
+                schema = properties[name]
+                if schema['type'] == 'string':
+                    if not isinstance(value, str):
+                        raise ValueError('Werkzeugargument muss ein String sein: ' + name)
+                elif schema['type'] == 'integer':
+                    if (type(value) is not int or value < schema.get('minimum', value)
+                            or value > schema.get('maximum', value)):
+                        raise ValueError('Ungültiges ganzzahliges Werkzeugargument: ' + name)
+                else:
+                    raise ValueError('Nicht unterstützter Argumenttyp.')
             result = handler(**args)
             return result if isinstance(result, ToolResult) else ToolResult(True, result)
         except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -48,7 +57,7 @@ class ToolRegistry:
 
 
 def workspace_tools(workspace, *, enhanced=True, test_runner=None, lint_runner=None, lint_fix_runner=None,
-                    security_runner=None, dependency_audit_runner=None):
+                    security_runner=None, dependency_audit_runner=None, range_reads=True):
     registry = ToolRegistry()
     for specification in FILE_TOOLS:
         if specification.name == "write_file" and not workspace.allow_write:
@@ -63,6 +72,12 @@ def workspace_tools(workspace, *, enhanced=True, test_runner=None, lint_runner=N
                                {"path": PATH, "query": {"type": "string"}}, read_only=True), files.search)
         registry.register(spec("file_snapshot", "Read UTF-8 content and its SHA-256 for targeted editing.",
                                {"path": PATH}, read_only=True), files.snapshot)
+        if range_reads:
+            line = {'type': 'integer', 'minimum': 1, 'maximum': MAX_LINE_NUMBER}
+            registry.register(spec('read_file_range',
+                                   'Read inclusive 1-based lines (at most 200 lines/12000 characters) and a full-file edit hash.',
+                                   {'path': PATH, 'start_line': line, 'end_line': line},
+                                   read_only=True), files.read_range)
         edit_args = {"path": PATH, "expected_sha256": {"type": "string"},
                      "old_text": {"type": "string"}, "new_text": {"type": "string"}}
         registry.register(spec("preview_edit", "Preview one exact replacement without changing the file.",

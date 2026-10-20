@@ -111,6 +111,96 @@ async function proposal(tools) {
   assert.equal(tools.proposals.size, 1);
   return [...tools.proposals.keys()][0];
 }
+test("range reads use dirty buffers and full hashes; stale range edits and invalid arguments fail", async () =>
+  fixture(async (tools, dir) => {
+    const doc = (await tools.read("a.py")).document;
+    doc.text = "# unsaved 😀\r\nvalue = 1\r\nlast\r\n";
+    doc.version++;
+    const controller = new Controller({ subscriptions: [] });
+    const session = { tools, mode: "plan" };
+    const response = await controller.bridge(
+      session,
+      "editor/tool",
+      {
+        name: "read_file_range",
+        arguments: { path: "./a.py", start_line: 2, end_line: 2 },
+      },
+      () => true,
+    );
+    assert.equal(response.ok, true, response.content);
+    const range = JSON.parse(response.content);
+    assert.equal(range.path, "a.py");
+    assert.equal(range.content, "value = 1\r\n");
+    assert.equal(range.sha256, sha(doc.text));
+    assert.equal(range.documentVersion, doc.version);
+    assert.equal(range.total_lines, 3);
+    const args = {
+      path: "a.py",
+      expected_sha256: range.sha256,
+      old_text: "value = 1",
+      new_text: "value = 2",
+    };
+    const edit = tools.execute("apply_edit", args, "implement", () => true);
+    await tools.decide(await proposal(tools), true);
+    assert.equal((await edit).ok, true);
+    assert.equal(
+      await fs.readFile(path.join(dir, "a.py"), "utf8"),
+      "value = 1\n",
+    );
+    assert.equal(
+      (await tools.execute("apply_edit", args, "implement", () => true)).ok,
+      false,
+    );
+    for (const patch of [
+      { start_line: "1" },
+      { start_line: true },
+      { end_line: 1.5 },
+      { end_line: Number.MAX_SAFE_INTEGER + 1 },
+      { end_line: 202 },
+      { extra: "x" },
+      { path: "../outside" },
+      { path: ".git/config" },
+      { start_line: 5, end_line: 5 },
+    ]) {
+      assert.equal(
+        (
+          await tools.execute(
+            "read_file_range",
+            {
+              path: "a.py",
+              start_line: 1,
+              end_line: 2,
+              ...patch,
+            },
+            "plan",
+            () => true,
+          )
+        ).ok,
+        false,
+        JSON.stringify(patch),
+      );
+    }
+    assert.equal(
+      (await tools.execute("read_file", { path: 1 }, "plan", () => true)).ok,
+      false,
+    );
+    doc.text = "x".repeat(12001);
+    assert.equal(
+      (
+        await tools.execute(
+          "read_file_range",
+          {
+            path: "a.py",
+            start_line: 1,
+            end_line: 1,
+          },
+          "plan",
+          () => true,
+        )
+      ).ok,
+      false,
+    );
+  }));
 test("dirty snapshots, per-diff approval, disk preservation and stale review rejection", async () =>
   fixture(async (tools, dir) => {
     const doc = (await tools.read("a.py")).document;
@@ -323,7 +413,7 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     await fs.mkdir(
       path.join(
         storage,
-        "backend-0.8.0",
+        "backend-0.9.0",
         process.platform === "win32" ? "Scripts" : "bin",
       ),
       { recursive: true },
@@ -342,13 +432,13 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     const runtime = controller.runtime;
     await fs.writeFile(runtime.python, "not executed");
     await fs.writeFile(
-      path.join(storage, "backend-0.8.0/ready.json"),
+      path.join(storage, "backend-0.9.0/ready.json"),
       JSON.stringify({ sha256: sha(bytes), sdk: false }),
     );
     assert.equal(await runtime.ready("demo"), runtime.python);
     await assert.rejects(runtime.ready("openai"), /Set Up/);
     await fs.writeFile(
-      path.join(storage, "backend-0.8.0/ready.json"),
+      path.join(storage, "backend-0.9.0/ready.json"),
       JSON.stringify({ sha256: "mismatch", sdk: true }),
     );
     await assert.rejects(runtime.ready("demo"), /Set Up/);

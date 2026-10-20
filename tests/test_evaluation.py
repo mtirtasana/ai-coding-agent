@@ -1,10 +1,13 @@
 import json
 import os
+import tempfile
 import unittest
+import io
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from agent.core.types import Message, ModelResponse, ToolCall
-from agent.evaluate import evaluate_profile
+from agent.evaluate import compare_read_results, create_read_fixture, evaluate_profile, main, read_fixture_structure
 
 
 class FixtureModel:
@@ -52,6 +55,69 @@ class FixtureModel:
             else:
                 return ModelResponse(Message('assistant', 'Fixed; external validation required.'))
         return ModelResponse(Message('assistant', tool_calls=(ToolCall(str(step), name, json.dumps(args)),)))
+
+
+class ReadFixtureModel:
+    """Scripted tool flow measures transport/context mechanics, not model intelligence."""
+    def __init__(self):
+        self.actions = None
+        self.step = 0
+        self.snapshot = None
+        self.edit = None
+        self.policy_seen = False
+
+    def generate(self, messages, tools):
+        prompt = next(m.content for m in messages if m.role == 'user')
+        if self.actions is None:
+            if 'subtotal in pricing.py' in prompt:
+                targets = [('pricing.py', 'subtotal', 'return price + quantity', 'return price * quantity'),
+                           ('invoice.py', 'total', '- shipping', '+ shipping')]
+            elif 'net_price' in prompt:
+                targets = [('discounts.py', 'net_price', 'return price * percentage / 100',
+                            'return price * (100 - clamp_discount(percentage)) / 100')]
+            else:
+                targets = [('calc.py', 'add', 'return a - b', 'return a + b')]
+            self.actions = [('test', None)]
+            if 'net_price' in prompt:
+                self.actions += [('search', ('discounts.py', 'clamp_discount', '', '')),
+                                 ('policy', None)]
+            for target in targets:
+                self.actions += [(action, target) for action in ['search', 'read', 'preview', 'apply']]
+            self.actions += [('test', None)]
+        if self.step >= len(self.actions):
+            self.assert_last_passed(messages)
+            return ModelResponse(Message('assistant', 'Fixed and independently verifiable.'))
+        action, target = self.actions[self.step]
+        if action == 'test':
+            name, args = 'run_tests', {}
+        elif action == 'search':
+            name, args = 'search_text', {'path': target[0], 'query': 'def ' + target[1] + '('}
+        elif action in {'read', 'policy'}:
+            found = json.loads(json.loads(messages[-1].content)['content'])['matches'][0]
+            if any(t.name == 'read_file_range' for t in tools):
+                name, args = 'read_file_range', {'path': found['path'], 'start_line': max(1, found['line'] - 4),
+                                                'end_line': found['line'] + 8}
+            else:
+                name, args = 'file_snapshot', {'path': found['path']}
+        elif action == 'preview':
+            self.snapshot = json.loads(json.loads(messages[-1].content)['content'])
+            assert target[2] in self.snapshot['content']
+            if 'net_price' in prompt:
+                assert self.policy_seen
+            self.edit = {'path': target[0], 'expected_sha256': self.snapshot['sha256'],
+                         'old_text': target[2], 'new_text': target[3]}
+            name, args = 'preview_edit', self.edit
+        else:
+            name, args = 'apply_edit', self.edit
+        if self.step and self.actions[self.step - 1][0] == 'policy':
+            policy = json.loads(json.loads(messages[-1].content)['content'])['content']
+            self.policy_seen = 'MAX_DISCOUNT = 25' in policy and 'def clamp_discount' in policy
+        self.step += 1
+        return ModelResponse(Message('assistant', tool_calls=(ToolCall(str(self.step), name, json.dumps(args)),)))
+
+    @staticmethod
+    def assert_last_passed(messages):
+        assert json.loads(json.loads(messages[-1].content)['content'])['passed']
 
 
 class EvaluationTests(unittest.TestCase):
@@ -110,3 +176,62 @@ class EvaluationTests(unittest.TestCase):
         model.generate.return_value = ModelResponse(Message('assistant', 'All fixed. Tests pass.'))
         results = evaluate_profile(self.profile, live=True, allow_exec=True, model_factory=lambda p: model)
         self.assertTrue(all(row['status'] == 'failed' for row in results))
+
+    def test_paired_reads_preserve_correctness_and_reduce_large_file_context(self):
+        results = [evaluate_profile(self.profile, live=True, allow_exec=True, suite='read_comparison',
+                                    read_strategy=strategy, model_factory=lambda p: ReadFixtureModel())
+                   for strategy in ['full', 'ranges']]
+        for rows in results:
+            self.assertTrue(all(row['status'] == 'passed' for row in rows), rows)
+            self.assertTrue(all(row['usage']['input_tokens']['reported_sum'] is None for row in rows))
+        pairs = compare_read_results(*results)
+        self.assertTrue(all(pair['both_passed'] for pair in pairs))
+        self.assertGreater(pairs[0]['selected_context_char_reduction'], 0)
+        self.assertEqual([r['model_calls'] for r in results[0]], [r['model_calls'] for r in results[1]])
+        self.assertEqual(compare_read_results(*results, offset=6)[0]['range_result'], 9)
+        print('\nDeterministic read comparison (characters, NOT live tokens): ' + json.dumps([
+            {'task': pair['task'], 'full_chars': before['selected_context_chars'],
+             'range_chars': after['selected_context_chars'], 'both_passed': pair['both_passed'],
+             'reduction': pair['selected_context_char_reduction']}
+            for pair, before, after in zip(pairs, *results, strict=True)]))
+
+    def test_read_comparison_opt_ins_and_unavailable_measurements(self):
+        factory = Mock(side_effect=AssertionError('No provider calls authorized'))
+        full = evaluate_profile(self.profile, suite='read_comparison', read_strategy='full', model_factory=factory)
+        ranges = evaluate_profile(self.profile, suite='read_comparison', model_factory=factory)
+        self.assertTrue(all(r['status'] == 'not_run' for r in full + ranges))
+        self.assertTrue(all(p['selected_context_char_reduction'] is None for p in compare_read_results(full, ranges)))
+        blocked = evaluate_profile(self.profile, live=True, suite='read_comparison', model_factory=factory)
+        self.assertTrue(all(r['reason'] == 'local_verification_not_enabled' for r in blocked))
+        factory.assert_not_called()
+        for kwargs in [{'suite': 'unknown'}, {'read_strategy': 'unknown'},
+                       {'suite': 'read_comparison', 'toolset': 'baseline'}]:
+            with self.assertRaises(ValueError):
+                evaluate_profile(self.profile, **kwargs)
+
+    def test_comparison_checks_fixture_identity_and_unrelated_declarations(self):
+        for task in ['large_file', 'multi_file', 'surrounding_context']:
+            with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+                root, _, before = create_read_fixture(Path(a), task)
+                self.assertEqual(before, create_read_fixture(Path(b), task)[2])
+                original = read_fixture_structure(root, task)
+                source = root / next(iter(original))
+                source.write_text(source.read_text() + '\nUNRELATED_CHANGE = True\n')
+                self.assertNotEqual(original, read_fixture_structure(root, task))
+
+    def test_cli_comparison_preserves_explicit_opt_ins_and_pair_indices(self):
+        output = io.StringIO()
+        with patch('sys.argv', ['coding-agent-eval', '--compare-reads']), patch('sys.stdout', output):
+            main()
+        report = json.loads(output.getvalue())
+        self.assertEqual(len(report['results']), 18)
+        self.assertEqual(len(report['read_comparisons']), 9)
+        self.assertTrue(all(row['status'] == 'not_run' for row in report['results']))
+        for pair in report['read_comparisons']:
+            self.assertEqual(report['results'][pair['full_result']]['read_strategy'], 'full')
+            self.assertEqual(report['results'][pair['range_result']]['read_strategy'], 'ranges')
+            self.assertIsNone(pair['selected_context_char_reduction'])
+        with patch('sys.argv', ['coding-agent-eval', '--compare-reads', '--toolset', 'both']), \
+                patch('sys.stderr', io.StringIO()), self.assertRaises(SystemExit) as error:
+            main()
+        self.assertEqual(error.exception.code, 2)

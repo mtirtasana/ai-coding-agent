@@ -14,6 +14,10 @@ Version 0.8 adds optional core cancellation and the editor adapter described in
 workers and reviewed buffer operations. The following baseline still explains the
 CLI/core; its earlier validation snapshot is historical.
 
+Version 0.9 adds [focused file reads and paired context-cost evaluation](token-efficiency.md).
+The range tool retains full-file edit hashes; integer argument validation and
+editor-buffer behavior are documented with that additive contract.
+
 ## 1. Problem, terminology and evidence
 
 The agent translates a natural-language coding request into observations,
@@ -307,8 +311,9 @@ sent to the chosen model endpoint.
 
 `ToolRegistry` connects names to specifications and handlers. It parses argument
 JSON, requires an object with exactly the declared keys, and currently accepts
-only string-valued arguments. Zero-argument process tools accept exactly `{}`.
-Supporting other schema types requires extending validation; the registry is not
+string-valued arguments plus bounded integers for range reads (added in v0.9).
+Booleans and floats do not satisfy integer fields. Zero-argument process tools
+accept exactly `{}`. Supporting further schema types requires extending validation; the registry is not
 a general JSON Schema validator. Expected operational exceptions become
 `ToolResult(False, error text)` so the model can inspect the failure.
 

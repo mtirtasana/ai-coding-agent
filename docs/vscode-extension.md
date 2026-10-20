@@ -1,4 +1,4 @@
-# VS Code extension architecture (v0.1 / backend v0.8)
+# VS Code extension architecture (v0.2 / backend v0.9)
 
 The extension adds an editor adapter to the generic agent. It preserves the
 Python CLI and its file-based behavior. Read the [extension user guide](../vscode/README.md)
@@ -85,6 +85,15 @@ invoke the CLI's direct filesystem write handlers. The Python and TypeScript
 sides validate workspace containment and protected paths independently. Reads
 validate eligible UTF-8 files and return current editor text, including unsaved
 changes; snapshots hash that text and include document version metadata.
+
+`read_file_range` returns at most 200 logical lines and 12,000 content code points
+from the same eligible buffer, plus canonical relative path, actual bounds,
+total line count, version and a full-buffer hash. Numeric arguments are validated
+independently in Python and TypeScript. A range hash works with the existing
+reviewed edit flow; external changes or edits elsewhere in the buffer make it
+stale. See [focused reads](token-efficiency.md) for EOF semantics and paired
+evaluation, including overhead on small files. JSON-RPC remains protocol 1;
+the extension and bundled backend now require matching version 0.9.0.
 
 Every `write_file` or `apply_edit` opens a native before/after diff and creates an
 approval request in the sidebar. Reject/cancel returns a tool failure. Accept

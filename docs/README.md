@@ -1,7 +1,7 @@
 # Documentation
 
 This documentation describes the generic coding agent implemented in version
-0.8.0, including the VS Code editor adapter on PR #1. The component reference and
+0.9.0, including focused range reads and the VS Code editor adapter on PR #1. The component reference and
 ADRs are in English. Earlier operational guides are available in German or
 English as indicated below.
 
@@ -12,6 +12,7 @@ English as indicated below.
 | Understand the system without reading all source files | [Component reference](components.md) | Its worked example and component map |
 | Understand why the system has this structure | [ADR index](adr/README.md) | The decision relevant to your change |
 | Use the VS Code extension | [Extension guide](../vscode/README.md) | [Editor architecture](vscode-extension.md) |
+| Reduce model input and measure tradeoffs | [Focused reads and context cost](token-efficiency.md) | [ADR-0017](adr/0017-focused-file-reads.md) |
 | Run the agent | [Project README](../README.md) | [Interactive terminal](interactive.md) |
 | Modify and verify code | [Coding workflow](coding-workflow.md) | [Tests and linting](testing-and-linting.md), [security checks](security-checks.md) |
 | Read the existing German architecture guide | [Architecture](architecture.md) | [Component reference](components.md) for the formal model and evidence limits |

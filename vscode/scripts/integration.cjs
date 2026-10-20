@@ -39,7 +39,7 @@ const version = process.env.VSCODE_TEST_VERSION || "stable";
     if (!fs.existsSync(executable))
       throw Error("VS Code bundle is missing its declared executable: " + name);
   }
-  const vsix = path.join(root, "generic-coding-agent-0.1.0.vsix");
+  const vsix = path.join(root, "generic-coding-agent-0.2.0.vsix");
   if (fs.existsSync(vsix)) {
     const cli = resolveCliPathFromVSCodeExecutablePath(executable);
     const result = spawnSync(

@@ -16,6 +16,70 @@ export const protectedPart = (p: string) =>
   [".git", ".ssh", ".aws"].includes(p) || p.startsWith(".env");
 export const sha = (s: string | Buffer) =>
   createHash("sha256").update(s).digest("hex");
+export function lineRange(text: string, start: unknown, end: unknown) {
+  if (
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 1 ||
+    end < start
+  )
+    throw Error(
+      "Expected positive integer line numbers with start_line <= end_line.",
+    );
+  if (end - start + 1 > 200)
+    throw Error("Range exceeds 200 lines; request a narrower range.");
+  const lines = (text.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g) || []).filter(Boolean);
+  if (start > lines.length && (lines.length || start !== 1))
+    throw Error("start_line is beyond the end of the file.");
+  const content = lines.slice(start - 1, end).join("");
+  if ([...content].length > 12000)
+    throw Error("Range exceeds 12000 characters; request a narrower range.");
+  return {
+    start_line: lines.length ? start : 0,
+    end_line: Math.min(end, lines.length),
+    total_lines: lines.length,
+    content,
+  };
+}
+export function validateEditorArguments(
+  name: string,
+  args: Record<string, unknown>,
+) {
+  const fields: Record<string, string[]> = {
+    list_files: ["path"],
+    read_file: ["path"],
+    file_snapshot: ["path"],
+    read_file_range: ["path", "start_line", "end_line"],
+    search_text: ["path", "query"],
+    write_file: ["path", "content"],
+    preview_edit: ["path", "expected_sha256", "old_text", "new_text"],
+    apply_edit: ["path", "expected_sha256", "old_text", "new_text"],
+  };
+  const expected = Object.hasOwn(fields, name) ? fields[name] : undefined;
+  if (
+    !expected ||
+    Object.keys(args).length !== expected.length ||
+    expected.some((key) => !Object.hasOwn(args, key))
+  )
+    throw Error("Missing or unknown editor tool arguments.");
+  for (const key of expected) {
+    if (
+      name === "read_file_range" &&
+      ["start_line", "end_line"].includes(key)
+    ) {
+      const value = args[key];
+      if (
+        typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < 1
+      )
+        throw Error("Expected positive integer line numbers.");
+    } else if (typeof args[key] !== "string")
+      throw Error("Expected string argument.");
+  }
+}
 export function relativePath(root: string, name: string): string {
   if (
     typeof name !== "string" ||

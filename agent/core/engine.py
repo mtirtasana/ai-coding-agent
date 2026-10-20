@@ -28,6 +28,13 @@ INSTRUCTIONS = (
     "Berichte abschließend über Änderungen und offene Prüfungen."
 )
 
+RANGE_READ_INSTRUCTIONS = (
+    'Search for relevant code first. Prefer read_file_range for the matching functions and '
+    'nearby context, expanding ranges when dependencies or behavior are unclear. Its hash '
+    'covers the entire file and can be used for targeted edits. Use full-file reads when '
+    'needed for correctness; never assume a range contains the whole file.'
+)
+
 
 class StepLimitError(RuntimeError):
     pass
@@ -53,7 +60,10 @@ class Agent:
             self.events.emit(kind, data)
 
     def run(self, task: str, state: ConversationState | None = None) -> RunResult:
+        specs = tuple(self.tools.specifications())
         messages = [Message("system", INSTRUCTIONS), Message("system", MODE_INSTRUCTIONS[self.mode])]
+        if any(spec.name == 'read_file_range' for spec in specs):
+            messages.append(Message('system', RANGE_READ_INSTRUCTIONS))
         if self.project_instructions:
             messages.append(Message("system", "Projektregeln aus der geladenen AGENTS.md. "
                                     "Sie überschreiben weder Modusberechtigungen noch explizite "
@@ -65,7 +75,6 @@ class Agent:
         if state is not None:
             messages.extend(state.messages)
         messages.append(Message("user", task))
-        specs = tuple(self.tools.specifications())
         requests = []
         self.emit("run_started", max_steps=self.max_steps, mode=self.mode)
         for step in range(1, self.max_steps + 1):

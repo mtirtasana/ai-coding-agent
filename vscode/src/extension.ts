@@ -168,7 +168,7 @@ export class Controller
       const reply = record(await client.request("initialize", config));
       if (session.generation !== generation)
         throw Error("Operation cancelled.");
-      if (reply.protocolVersion !== 1 || reply.backendVersion !== "0.8.0")
+      if (reply.protocolVersion !== 1 || reply.backendVersion !== "0.9.0")
         throw Error("Incompatible backend. Run backend setup again.");
       return client;
     } catch (e) {
@@ -206,14 +206,7 @@ export class Controller
     if (method === "editor/tool") {
       if (typeof params.name !== "string") throw Error("Invalid tool name.");
       const args = record(params.arguments);
-      if (Object.values(args).some((v) => typeof v !== "string"))
-        throw Error("Invalid arguments.");
-      return session.tools.execute(
-        params.name,
-        args as Record<string, string>,
-        session.mode,
-        current,
-      );
+      return session.tools.execute(params.name, args, session.mode, current);
     }
     if (method === "editor/instructions") return session.instructions || "";
     if (method === "editor/beforeCheck") {

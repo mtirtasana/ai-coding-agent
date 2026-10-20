@@ -32,6 +32,7 @@ formal review process that did not occur.
 | [0014](0014-editor-buffer-ownership.md) | Review edits and let the editor own buffers | Accepted | Editor ToolExecutor |
 | [0015](0015-cancellable-editor-workers.md) | Separate completions and coordinate cancellation | Accepted | Workers and runner |
 | [0016](0016-managed-runtime-and-vsix.md) | Ship a managed backend and allowlisted VSIX | Accepted | Setup and packaging |
+| [0017](0017-focused-file-reads.md) | Prefer bounded excerpts and measure task-level context cost | Accepted | Retrieval, prompts and evaluation |
 
 
 Record 0012 accepts the decision to defer implementation. It does **not**

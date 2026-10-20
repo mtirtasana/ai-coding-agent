@@ -37,12 +37,15 @@ values remain unknown. Cached input is a subset of input, not an additional tota
 | --- | --- | --- |
 | Literal search | `search_text(path, query)` | Both modes |
 | Exact text snapshot | `file_snapshot(path)` | Both modes |
+| Focused excerpt with full-file hash | `read_file_range(path, start_line, end_line)` | Both modes; v0.9 |
 | Diff preview | `preview_edit(path, expected_sha256, old_text, new_text)` | Both modes |
 | Targeted replacement | `apply_edit` with the same arguments | Implementation plus `--allow-write` |
 | Configured local tests | `run_tests()` | Implementation plus both execution flags |
 
 Existing `list_files`, `read_file`, and `write_file` remain compatible. The model
-is instructed to prefer search, snapshots, and targeted edits. A preview is not a
+is instructed to search first and prefer relevant ranges, expanding or reading
+whole files when correctness requires it. See [focused reads](token-efficiency.md)
+for limits, hashes and the paired `--compare-reads` evaluation. A CLI preview is not a
 separate user approval gate, and the apply tool does not require a prior preview
 call; it independently rechecks all arguments and the file version.
 

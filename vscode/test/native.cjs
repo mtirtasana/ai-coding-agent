@@ -32,6 +32,18 @@ exports.run = async () => {
   );
   assert(snapshot.content.startsWith("# unsaved"));
   assert.equal(snapshot.sha256, hash(doc.getText()));
+  const rangeReply = await tools.execute(
+    "read_file_range",
+    { path: "./review.py", start_line: 2, end_line: 2 },
+    "plan",
+    () => true,
+  );
+  assert.equal(rangeReply.ok, true, rangeReply.content);
+  const range = JSON.parse(rangeReply.content);
+  assert.equal(range.path, "review.py");
+  assert.equal(range.content, "value = 1\n");
+  assert.equal(range.total_lines, 2);
+  assert.equal(range.sha256, snapshot.sha256);
   const denied = await tools.execute(
     "apply_edit",
     {
@@ -48,7 +60,7 @@ exports.run = async () => {
     "apply_edit",
     {
       path: "review.py",
-      expected_sha256: snapshot.sha256,
+      expected_sha256: range.sha256,
       old_text: "value = 1",
       new_text: "value = 2",
     },
@@ -110,13 +122,14 @@ exports.run = async () => {
   const crlfSnapshot = JSON.parse(
     (
       await tools.execute(
-        "file_snapshot",
-        { path: "crlf.py" },
+        "read_file_range",
+        { path: "crlf.py", start_line: 1, end_line: 1 },
         "plan",
         () => true,
       )
     ).content,
   );
+  assert.equal(crlfSnapshot.content, crlfDoc.getText());
   const normalized = tools.execute(
     "apply_edit",
     {
@@ -142,7 +155,7 @@ exports.run = async () => {
   await vscode.window.showTextDocument(crlfDoc);
   await vscode.commands.executeCommand("workbench.action.files.revert");
   console.log(
-    "Native VS Code tests passed: activation, dirty snapshots, planning denial, reviewed apply, unsaved buffers, Undo, rejection, diagnostics and path guards.",
+    "Native VS Code tests passed: activation, dirty snapshots and range reads, planning denial, reviewed apply, unsaved buffers, Undo, rejection, diagnostics and path guards.",
   );
   await vscode.window.showTextDocument(doc);
   await vscode.commands.executeCommand("workbench.action.files.revert");

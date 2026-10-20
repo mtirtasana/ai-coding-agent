@@ -368,7 +368,7 @@ Modell. `execute()` nimmt einen konkreten Aufruf entgegen.
 flowchart TD
     Call["ToolCall"] --> Name{"Werkzeug registriert?"}
     Name -->|Ja| JSON["JSON dekodieren"]
-    JSON --> Args{"Objekt, exakte Schlüsselliste und String-Werte?"}
+    JSON --> Args{"Exakte Schlüssel und unterstützte Schematypen?"}
     Args -->|Ja| Handler["Handler aufrufen"]
     Handler --> OK["ToolResult: Handlerstatus oder ok=true bei Text"]
     Name -->|Nein| Error["ToolResult: ok=false"]
@@ -377,10 +377,12 @@ flowchart TD
     Handler -->|Erwarteter Fehler| Error
 ```
 
-Die Validierung verlangt aktuell exakt die im Schema genannten Schlüssel und
-String-Werte für alle Argumente. `run_tests` verwendet ein leeres Argumentobjekt.
+Die Validierung verlangt exakt die im Schema genannten Schlüssel. Bisherige
+Werkzeuge verlangen weiterhin Strings; `read_file_range` ergänzt begrenzte
+Integer-Zeilennummern und lehnt Floats, Booleans und numerische Strings ab.
+`run_tests` verwendet ein leeres Argumentobjekt.
 Die Registry ist kein vollständiger JSON-Schema-Validator. Optionale Felder,
-Zahlen, Arrays oder verschachtelte Objekte erfordern eine Erweiterung.
+weitere Zahlentypen, Arrays oder verschachtelte Objekte erfordern eine Erweiterung.
 
 `OSError`, `ValueError`, `KeyError` und `TypeError` werden in Fehlerergebnisse
 umgewandelt. Andere Exceptions werden weitergereicht und beenden den Lauf, wenn
@@ -391,7 +393,9 @@ oder ein explizites `ToolResult` liefern; Testfehler bleiben damit `ok=False`.
 
 `workspace_tools(workspace)` registriert `list_files` und `read_file`.
 Nur bei `workspace.allow_write=True` kommen `write_file` und `apply_edit` hinzu.
-Standardmäßig ergänzen Suche, Snapshot und Vorschau die ursprünglichen Tools.
+Standardmäßig ergänzen Suche, Snapshot, Bereichsabruf und Vorschau die ursprünglichen Tools.
+Die [Bereichsabruf-Dokumentation](token-efficiency.md) beschreibt den aktuellen
+Vertrag und die gemessenen Zeichenkosten; vollständige Dateiabrufe bleiben verfügbar.
 Ein explizit übergebener `LocalTestRunner` registriert `run_tests`; der Planungsmodus
 entfernt alle nicht lesenden Werkzeuge und blockiert erfundene Aufrufe ebenfalls. Im Lesemodus sieht
 das Modell dieses Werkzeug also nicht. Ein trotzdem erzeugter Schreibaufruf wird
@@ -595,7 +599,7 @@ gegebenenfalls zuerst das gemeinsame Datenmodell erweitert werden.
 ### Ein Werkzeug ergänzen
 
 Ein Werkzeug benötigt eine Spezifikation und eine aufrufbare Funktion.
-Dieses Beispiel bleibt absichtlich bei den aktuell unterstützten String-Argumenten:
+Dieses Beispiel verwendet String-Argumente:
 
 ```python
 from agent.adapters.tools import ToolRegistry, spec

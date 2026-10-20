@@ -8,6 +8,8 @@ import {
   replaceUnique,
   sha,
   validateText,
+  lineRange,
+  validateEditorArguments,
 } from "./shared";
 
 export interface ToolReply {
@@ -219,18 +221,34 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
   }
   async execute(
     name: string,
-    args: Record<string, string>,
+    rawArgs: Record<string, unknown>,
     mode: "plan" | "implement",
     current: () => boolean,
   ): Promise<ToolReply> {
     try {
       if (!current() || !vscode.workspace.isTrusted)
         throw Error("Run cancelled or workspace untrusted.");
-      const pathArg = args.path;
-      if (typeof pathArg !== "string") throw Error("Missing path.");
+      validateEditorArguments(name, rawArgs);
+      const pathArg = rawArgs.path as string;
       if (["write_file", "apply_edit"].includes(name) && mode !== "implement")
         throw Error("Planning cannot edit files.");
       const file = await this.guarded(pathArg);
+      if (name === "read_file_range") {
+        const snap = await this.read(pathArg);
+        return {
+          ok: true,
+          content: JSON.stringify({
+            path: path
+              .relative(await this.canonicalRoot(), snap.file)
+              .split(path.sep)
+              .join("/"),
+            sha256: snap.hash,
+            documentVersion: snap.document.version,
+            ...lineRange(snap.text, rawArgs.start_line, rawArgs.end_line),
+          }),
+        };
+      }
+      const args = rawArgs as Record<string, string>;
       if (name === "list_files") {
         const entries = await fs.readdir(file, { withFileTypes: true });
         entries.sort((a, b) => a.name.localeCompare(b.name));

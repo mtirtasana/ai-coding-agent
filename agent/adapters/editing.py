@@ -7,6 +7,8 @@ import stat
 import tempfile
 from collections import deque
 
+from .ranges import line_range
+
 
 SKIP_DIRS = {'.git', '.ssh', '.aws', '.venv', 'venv', 'node_modules', '__pycache__',
              '.tox', '.ruff_cache', 'build', 'dist'}
@@ -29,6 +31,12 @@ class FileTools:
         resolved, raw, text = self._read(path)
         return json.dumps({'path': str(resolved.relative_to(self.workspace.root)),
                            'sha256': hashlib.sha256(raw).hexdigest(), 'content': text}, ensure_ascii=False)
+
+    def read_range(self, path, start_line, end_line):
+        resolved, raw, text = self._read(path)
+        return json.dumps({'path': resolved.relative_to(self.workspace.root).as_posix(),
+                           'sha256': hashlib.sha256(raw).hexdigest(),
+                           **line_range(text, start_line, end_line)}, ensure_ascii=False)
 
     def search(self, path, query):
         if not query or len(query) > 512 or '\n' in query or '\r' in query:
