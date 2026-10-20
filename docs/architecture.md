@@ -54,6 +54,12 @@ Moduswechsel und Root-Projektregeln sind zusätzlich in der
 Verträge für diese Fähigkeiten. Adapter erfüllen die Verträge mit konkreten
 Bibliotheken, APIs oder Dateisystemzugriffen.
 
+Seit Version 0.10 ergänzen CLI-Adapter begrenzte Dateianhänge, lesbaren Fortschritt
+und opt-in Diff-Bestätigung über `--review-edits`. Der Kern liefert zusätzlich
+`tool_started`-Metadaten, kennt aber keine Terminalbibliothek. Der Standard ohne
+Review-Flag sowie die Editor-Bestätigung bleiben erhalten; Details und Grenzen
+stehen in [ADR-0018](adr/0018-interactive-cli-workflow.md).
+
 Beispiel: Der Kern ruft `ModelProvider.generate(messages, tools)` auf. Er kennt
 dabei eigene `Message`- und `ToolSpec`-Objekte. Der OpenAI-Adapter übersetzt diese
 in die Responses API; der Ollama-Adapter übersetzt sie in die Chat API. Der Kern

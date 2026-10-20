@@ -1,4 +1,4 @@
-# VS Code extension architecture (v0.2 / backend v0.9)
+# VS Code extension architecture (v0.2.1 / backend v0.10)
 
 The extension adds an editor adapter to the generic agent. It preserves the
 Python CLI and its file-based behavior. Read the [extension user guide](../vscode/README.md)
@@ -93,7 +93,9 @@ independently in Python and TypeScript. A range hash works with the existing
 reviewed edit flow; external changes or edits elsewhere in the buffer make it
 stale. See [focused reads](token-efficiency.md) for EOF semantics and paired
 evaluation, including overhead on small files. JSON-RPC remains protocol 1;
-the extension and bundled backend now require matching version 0.9.0.
+the extension and bundled backend now require matching version 0.10.0. This
+backend also includes CLI workflow improvements; terminal review/attachments are
+CLI adapters and do not replace the editor's existing review flow.
 
 Every `write_file` or `apply_edit` opens a native before/after diff and creates an
 approval request in the sidebar. Reject/cancel returns a tool failure. Accept

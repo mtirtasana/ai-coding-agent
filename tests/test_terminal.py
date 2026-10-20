@@ -82,7 +82,7 @@ class TerminalTests(unittest.TestCase):
     def test_command_completion(self):
         self.assertEqual(command_candidates("/pl"), ("/plan",))
         self.assertEqual(command_candidates("/i"), ("/implement", "/instructions"))
-        self.assertEqual(len(command_candidates("/")), 6)
+        self.assertTrue({'/status', '/attach', '/attachments', '/detach'}.issubset(command_candidates('/')))
         self.assertEqual(command_candidates("/plan task"), ())
         self.assertEqual(command_candidates("ordinary task"), ())
 
@@ -108,7 +108,7 @@ class TerminalTests(unittest.TestCase):
         with patch.object(self.model, "generate", side_effect=KeyboardInterrupt):
             self.shell.handle("Interrupted task")
         self.assertEqual(self.shell.state.messages, original)
-        self.assertIn("No automatic retry", self.output[-1])
+        self.assertTrue(any('No automatic retry' in line for line in self.output))
         self.shell.handle("Next task")
         self.assertEqual(len(self.calls), 2)
 
@@ -116,7 +116,7 @@ class TerminalTests(unittest.TestCase):
         with patch.object(self.model, "generate", side_effect=RuntimeError("network")):
             self.shell.handle("Failed task")
         self.assertEqual(self.shell.state.messages, [])
-        self.assertIn("Run failed", self.output[-1])
+        self.assertTrue(any('Run failed' in line for line in self.output))
         self.shell.handle("Working task")
         self.assertEqual(len(self.calls), 1)
 

@@ -7,5 +7,6 @@ class JsonlEventSink:
         self.stream = stream
 
     def emit(self, kind, data):
-        self.stream.write(json.dumps({"event": kind, **data}, ensure_ascii=False) + "\n")
+        # ASCII escaping also keeps C1/bidi controls from model-supplied tool names inert.
+        self.stream.write(json.dumps({"event": kind, **data}, ensure_ascii=True) + "\n")
         self.stream.flush()

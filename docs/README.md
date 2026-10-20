@@ -1,7 +1,7 @@
 # Documentation
 
 This documentation describes the generic coding agent implemented in version
-0.9.0, including focused range reads and the VS Code editor adapter on PR #1. The component reference and
+0.10.0, including the improved interactive CLI, focused range reads and the VS Code editor adapter on PR #1. The component reference and
 ADRs are in English. Earlier operational guides are available in German or
 English as indicated below.
 

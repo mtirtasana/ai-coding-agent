@@ -56,10 +56,11 @@ still requires reviewing each edit.
 
 ## Settings, privacy and recovery
 
-Backend 0.9 adds bounded `read_file_range` requests over the current editor
+Backend 0.9 introduced bounded `read_file_range` requests over the current editor
 buffer, including unsaved text. The full-buffer hash still protects reviewed
 edits. Existing full reads remain available. See [focused reads and measured
-context cost](../docs/token-efficiency.md). After installing extension 0.2, run
+context cost](../docs/token-efficiency.md). Extension 0.2.1 bundles backend 0.10.0,
+including the CLI workflow adapters. After installing it, run
 **Coding Agent: Set Up / Update Backend** to prepare its matching backend.
 
 Provider/model/base URL, checks and budgets use `genericAgent.*` settings. API

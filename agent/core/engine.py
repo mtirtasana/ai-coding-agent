@@ -107,6 +107,7 @@ class Agent:
                 return RunResult(response.content, step, messages, requests)
             for call in response.tool_calls:
                 self.cancellation.check()
+                self.emit('tool_started', name=call.name)
                 result = self.tools.execute(call)
                 messages.append(Message("tool", json.dumps(
                     {"ok": result.ok, "content": result.content}, ensure_ascii=False),

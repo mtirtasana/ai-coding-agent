@@ -413,7 +413,7 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     await fs.mkdir(
       path.join(
         storage,
-        "backend-0.9.0",
+        "backend-0.10.0",
         process.platform === "win32" ? "Scripts" : "bin",
       ),
       { recursive: true },
@@ -432,13 +432,13 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     const runtime = controller.runtime;
     await fs.writeFile(runtime.python, "not executed");
     await fs.writeFile(
-      path.join(storage, "backend-0.9.0/ready.json"),
+      path.join(storage, "backend-0.10.0/ready.json"),
       JSON.stringify({ sha256: sha(bytes), sdk: false }),
     );
     assert.equal(await runtime.ready("demo"), runtime.python);
     await assert.rejects(runtime.ready("openai"), /Set Up/);
     await fs.writeFile(
-      path.join(storage, "backend-0.9.0/ready.json"),
+      path.join(storage, "backend-0.10.0/ready.json"),
       JSON.stringify({ sha256: "mismatch", sdk: true }),
     );
     await assert.rejects(runtime.ready("demo"), /Set Up/);

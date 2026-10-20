@@ -35,10 +35,20 @@ coding-agent --provider demo --allow-write
 
 Ohne Aufgabe startet eine gemeinsame Sitzung im Modus `plan`. Tab ergänzt
 Slash-Befehle: `/plan`, `/implement`, `/instructions`, `/help`, `/new`, `/exit`.
+Zusätzlich stehen `/status`, `/attach "Pfad" [Start:Ende]`, `/attachments` und
+`/detach <ID|all>` bereit. Enter sendet; Alt+Enter ergänzt eine neue Zeile.
+Dateianhänge werden beim Senden frisch gelesen und nach erfolgreicher Arbeit
+aus der Warteschlange entfernt. Fortschritt und Zusammenfassungen zeigen
+Prüfergebnisse, Änderungen und tatsächlich gemeldete Tokenwerte getrennt.
+`--no-progress` blendet Fortschrittszeilen aus; `--verbose` bleibt JSONL auf stderr.
 `/plan <Aufgabe>` plant lesend. `/implement` akzeptiert den letzten erfolgreichen
 Plan, wechselt den Modus und wartet auf die nächste Aufgabe. Schreibzugriff gibt
 es nur in `implement` mit `--allow-write`; `plan` bleibt immer lesend.
 Die Demo ist kein echtes Planungsmodell; für reale Aufgaben Ollama oder OpenAI wählen.
+Optional verlangt `--allow-write --review-edits` für jede Dateiänderung eine
+Bestätigung des vollständigen Diffs im Terminal. Ohne `--review-edits` bleiben
+direkte Änderungen aktiviert, sofern Schreibrechte bestehen. Review benötigt
+ein echtes Terminal und lässt sich nicht mit `--lint-fix-command` kombinieren.
 
 Die Root-Datei `AGENTS.md` wird automatisch geladen und im Kontext behalten.
 `/instructions` zeigt den geladenen Stand, `/new` leert die Sitzung und lädt neu.

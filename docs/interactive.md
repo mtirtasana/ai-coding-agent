@@ -3,6 +3,8 @@
 Since version 0.4 the agent supports a shared in-memory conversation, Tab-completed commands, enforced
 planning permissions, and automatic workspace-root `AGENTS.md` loading. The same
 agent core and provider adapters serve both interactive and single-task usage.
+Version 0.10 adds multiline composition, explicit file attachments, readable
+progress and summaries, and opt-in per-edit terminal review.
 
 ## Installation and start
 
@@ -35,6 +37,10 @@ The prompt displays the mode and effective write permission.
 | `/plan <task>` | Switch to planning and submit the explicit task |
 | `/implement` | Accept the latest successful planning response, switch to implementation, and wait |
 | `/instructions` | Display the actual loaded root instruction snapshot and path |
+| `/status` | Display workspace, provider/model, mode/permissions, character budget, review setting and attachment count |
+| `/attach "path" [start:end]` | Queue a guarded file or inclusive line range for the next successful task |
+| `/attachments` | List pending attachment IDs and ranges locally |
+| `/detach <id\|all>` | Remove a queued attachment, or all of them |
 | `/help` | List commands and effective permissions |
 | `/new` | Reload root instructions, clear history and plans, return to planning |
 | `/exit` | Exit |
@@ -42,9 +48,106 @@ The prompt displays the mode and effective write permission.
 Tab completes slash-command names. `/pl` followed by Tab becomes `/plan`;
 ambiguous prefixes display completion choices and further Tabs cycle them.
 No model call is needed for completion or command handling. `/plan <task>` is the
-explicit exception that also submits work. Other commands reject arguments.
+explicit exception that also submits work. Attach/detach accept the arguments
+shown above; other commands reject arguments.
 Unknown slash commands offer nearby names without forwarding the text to a model.
 Single-task CLI arguments are ordinary tasks, not slash-command input.
+
+Enter submits the current task. **Alt+Enter** inserts a newline; bracketed
+multiline paste stays editable until Enter. Tab also completes workspace paths
+after `/attach`, including quoted names containing spaces. Use `/` separators
+for cross-platform completion and quote names containing backslashes or spaces.
+Completion excludes protected paths, outside-workspace symlinks and names with
+terminal control characters. It is local filesystem work, not an AI request.
+
+### Explicit file attachments
+
+```text
+/attach "src/my file.py" 10:35
+/attachments
+1: src/my file.py [10:35]
+Explain this function and the surrounding assumptions
+```
+
+Queue at most five attachments totaling 40,000 content characters. Each follows
+the [range contract](token-efficiency.md#tool-contract-and-data-flow): at most
+200 logical lines and 12,000 content code points, preserving original endings.
+Without bounds, the entire file must fit both limits; no excerpt is silently
+substituted. Protected, binary, invalid UTF-8, NUL and oversized files are denied.
+
+Queue entries retain paths and ranges, not persisted source content. Every
+submission reads fresh snapshots, checks canonical targets and bounds again,
+and places path/line/hash metadata and contents in the user request as project
+data, not system instructions. File attachments are sent to the selected model
+only when you submit a task. A validation failure makes no model call and leaves
+the task editable. Successful runs consume the pending queue; failures and
+interruptions keep it. `/new` clears pending attachments and the recovery draft.
+Attachments from completed turns remain in ordinary in-memory conversation
+history and may be selected again by the context builder.
+
+### Progress, summaries and output channels
+
+Interactive TTY runs show plain progress lines for model requests and tool
+start/completion. `--no-progress` hides those lines, while final summaries remain.
+There is no spinner, color requirement or token streaming. Redirected output
+receives no animated UI, and `NO_COLOR` needs no special renderer behavior.
+
+Run summaries show elapsed time, attempted/completed model calls, tool counts,
+applied/rejected file-tool changes, and individual check outcomes. Repeated
+checks retain each outcome rather than hiding an earlier failure behind a pass.
+Unattempted test/lint/security/dependency-audit checks are labeled not run.
+Configured fix processes are not counted as individual file-tool edits. Check
+results describe their execution, not a guarantee of freshness after later edits.
+
+Provider input, output and cached-input token sums include response coverage;
+unknown usage remains unknown and zero is retained. Cached input is a subset of
+input, not an additional total or a free-token assumption. Cumulative context
+characters are labeled separately and are not a token estimate.
+
+Human output stays on stdout. `--verbose` keeps JSONL metadata on stderr; Unicode
+is escaped in JSON without changing decoded event values. Redirect stderr to
+capture machine-readable traces independently. Plain model/file text escapes
+terminal controls; the trusted input widget still uses normal terminal cursor
+controls. Existing single-task invocations without review retain final-answer
+output without progress or summaries.
+With verbose mode, runtime failures/interruption produce structured `cli_error`
+or `cli_interrupted` metadata instead of appending plain error text to the trace.
+Argument-parsing/configuration errors before runtime still use argparse's normal
+stderr diagnostics and exit code 2.
+
+### Opt-in terminal edit review
+
+```bash
+coding-agent --provider ollama --model YOUR_MODEL --allow-write --review-edits
+```
+
+`--review-edits` defaults to off and works for interactive and single-task usage.
+It requires `--allow-write`, real stdin/stdout terminals and `.[terminal]`.
+These requirements are checked before provider clients are created. It cannot
+be combined with `--lint-fix-command`. Without the flag, existing direct-edit
+behavior remains available.
+
+Each `write_file` or `apply_edit` displays its complete unified diff and waits
+for **a/apply** or **r/reject**. Empty input, unrecognized answers and EOF reject;
+Ctrl+C rejects the pending change and interrupts the run. No Apply-all option is
+added. A `preview_edit` call itself never prompts. Model/file text is rendered
+literally, so embedded control sequences cannot turn the diff into terminal commands.
+
+Acceptance rechecks the canonical target, existence and complete original bytes.
+Changes outside a previously read excerpt also make an edit stale. Existing
+files use same-directory staged atomic replacement and retain permission bits.
+New files use atomic no-overwrite hard-link creation; unsupported filesystems
+report a tool failure instead of falling back to overwriting a target. New
+staged files retain private temporary-file permissions. Rejected/invalid changes
+do not create parent directories; accepted changes can leave created directories
+if a later filesystem operation fails. Temporary files are cleaned up.
+
+These are optimistic checks, not filesystem locking or OS isolation. A concurrent
+change in the interval after final checking can still race a replacement. The
+gate covers dedicated file tools, not arbitrary configured verification code,
+which continues to run with host permissions and can write files. Planning
+continues to reject both write and process tools. Review decisions and source
+diffs are not added to verbose metadata logs.
 
 Example session:
 
@@ -75,6 +178,8 @@ flowchart TD
     User["Terminal input"] --> Dispatch{"Slash command?"}
     Dispatch -->|Yes| Commands["Local command dispatcher"]
     Commands --> State["ConversationState and active mode"]
+    Commands --> Attach["Pending attachment paths and ranges"]
+    Attach -->|Fresh guarded snapshots on submit| Factory
     Dispatch -->|No: task| Factory["Agent factory"]
     Commands -->|Explicit /plan task| Factory
     State --> Factory
@@ -82,7 +187,11 @@ flowchart TD
     Factory --> Agent["Agent core"]
     Agent --> Context["ContextBuilder"]
     Agent --> Policy["ModeToolExecutor"]
-    Policy --> Registry["ToolRegistry"]
+    Agent --> Observer["CLI progress and result observer"]
+    Policy --> Console["Validated CLI tool adapter"]
+    Console -->|Reads and direct mode| Registry["ToolRegistry"]
+    Console -->|Opt-in file writes| Review["Complete diff and Apply / Reject"]
+    Review -->|Accept and revalidate| Workspace
     Registry --> Workspace["Workspace"]
     Context --> Provider["ModelProvider"]
 ```
@@ -90,6 +199,12 @@ flowchart TD
 `agent/terminal.py` owns input, completion, command parsing, the mode, and session
 lifetime. It imports `prompt-toolkit` only when creating a prompt session. The CLI
 provides a factory that creates an Agent with the current mode and loaded rules.
+The [attachment queue](../agent/adapters/attachments.py),
+[presentation observer](../agent/adapters/console.py) and
+[review adapter](../agent/adapters/review.py) keep terminal policy and file effects
+outside the core. Core `tool_started`/`tool_completed` events provide metadata;
+the CLI adapter observes actual results for check and edit summaries. The outer
+mode policy blocks disallowed calls before any review or process callback.
 
 `agent/core/policy.py` wraps the tool executor. In `plan` it exposes and executes
 only tools explicitly marked `ToolSpec.read_only=True`. Other tools are rejected
@@ -139,10 +254,10 @@ sequenceDiagram
         Agent->>Agent: Execute allowed tools and append results locally
     end
     alt Successful final response
-        Agent->>State: Commit complete turn; update latest_plan in plan mode
+        Agent->>State: Commit complete turn and update latest_plan if planning
         Agent-->>Shell: RunResult
     else Failure or interruption
-        Agent-->>Shell: Error; shared conversation unchanged
+        Agent-->>Shell: Error with shared conversation unchanged
     end
 ```
 
@@ -195,6 +310,10 @@ The repository's existing root `AGENTS.md` is an example. A minimal project file
 Empty input makes no request. Ctrl+C at the prompt clears the current draft;
 Ctrl+C during execution returns to the prompt and reports interruption. EOF exits.
 The terminal catches ordinary task errors and remains usable.
+After task failure/interruption, the original task is restored as an editable
+draft, and pending attachments remain. No automatic retry is performed. Provider
+errors use controlled guidance rather than printing raw SDK exceptions or request
+bodies. Attachment validation errors identify the local correction needed.
 
 Only successful turns enter shared history. A failed or interrupted turn can
 already have changed files, and those changes are not rolled back. The terminal
@@ -217,7 +336,18 @@ loading failures, command parsing, unknown commands, reset/reload behavior,
 interruption recovery, and CLI defaults. A real `prompt-toolkit` prompt is fed
 `/pl`, Tab, and Enter to verify completion. That one test skips if the optional
 terminal dependency is missing; GitHub Actions installs the terminal extra so it
-runs there. No live model credentials are needed.
+runs there. Additional real-input tests cover Alt+Enter, bracketed paste and
+quoted path completion. Attachment limits/freshness/recovery, complete diff
+approval/rejection, concurrent changes, no-overwrite creation, output channel
+separation and token coverage have regression tests. These new prompt tests
+require the terminal extra. No live model credentials are needed.
+The extension CI matrix also runs the CLI workflow regression file on Linux,
+Windows and macOS with the terminal extra installed.
+
+A real PTY smoke used a scripted provider, an attached file, an accepted edit and
+an actual configured check. It verified the changed disk contents, queue
+consumption and a separately captured valid JSONL trace. This validates the CLI
+workflow, not live-provider quality or every terminal emulator.
 
 ## Version 0.5: verification capability
 

@@ -168,7 +168,7 @@ export class Controller
       const reply = record(await client.request("initialize", config));
       if (session.generation !== generation)
         throw Error("Operation cancelled.");
-      if (reply.protocolVersion !== 1 || reply.backendVersion !== "0.9.0")
+      if (reply.protocolVersion !== 1 || reply.backendVersion !== "0.10.0")
         throw Error("Incompatible backend. Run backend setup again.");
       return client;
     } catch (e) {

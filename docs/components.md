@@ -18,6 +18,10 @@ Version 0.9 adds [focused file reads and paired context-cost evaluation](token-e
 The range tool retains full-file edit hashes; integer argument validation and
 editor-buffer behavior are documented with that additive contract.
 
+Version 0.10 adds [interactive CLI composition, attachments and opt-in review](interactive.md),
+with presentation adapters and an additive `tool_started` event. Direct CLI
+writes remain the default; editor approvals remain a separate adapter contract.
+
 ## 1. Problem, terminology and evidence
 
 The agent translates a natural-language coding request into observations,
