@@ -87,6 +87,51 @@ class OllamaProvider:
         return ModelResponse(Message("assistant", result.get("content") or "", calls), usage)
 
 
+class OpenAICompatibleProvider:
+    """Chat Completions with tool calling; no Responses fallback or SDK retries."""
+    def __init__(self, model: str, base_url: str, api_key: str, client=None):
+        from urllib.parse import urlsplit
+        url = urlsplit(base_url)
+        if (url.scheme not in {"http", "https"} or not url.hostname
+                or url.username or url.password or url.query or url.fragment):
+            raise ValueError("Base URL must be HTTP(S), without credentials, query or fragment.")
+        if not model or not api_key:
+            raise ValueError("Compatible provider requires a model and an API key.")
+        if client is None:
+            from openai import OpenAI
+            client = OpenAI(base_url=base_url, api_key=api_key, timeout=120, max_retries=0)
+        self.client, self.model = client, model
+
+    def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse:
+        items = []
+        for message in messages:
+            item = {"role": message.role, "content": message.content}
+            if message.role == "tool":
+                item["tool_call_id"] = message.call_id
+            if message.tool_calls:
+                item["content"] = message.content or None
+                item["tool_calls"] = [{"id": call.id, "type": "function", "function": {
+                    "name": call.name, "arguments": call.arguments}} for call in message.tool_calls]
+            items.append(item)
+        kwargs = {"model": self.model, "messages": items, "stream": False}
+        if tools:
+            kwargs["tools"] = [{"type": "function", "function": {
+                "name": tool.name, "description": tool.description,
+                "parameters": tool.parameters}} for tool in tools]
+        response = self.client.chat.completions.create(**kwargs)
+        result = response.choices[0].message
+        calls = tuple(ToolCall(call.id, call.function.name, call.function.arguments)
+                      for call in (result.tool_calls or []))
+        raw = getattr(response, "usage", None)
+        usage = None
+        if raw is not None:
+            details = getattr(raw, "prompt_tokens_details", None)
+            usage = ModelUsage(token_count(getattr(raw, "prompt_tokens", None)),
+                               token_count(getattr(raw, "completion_tokens", None)),
+                               token_count(getattr(details, "cached_tokens", None)))
+        return ModelResponse(Message("assistant", result.content or "", calls), usage)
+
+
 class DemoProvider:
     """Deterministischer Offline-Durchlauf, kein Sprachmodell."""
     def generate(self, messages, tools):
