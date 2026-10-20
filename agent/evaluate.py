@@ -108,9 +108,9 @@ def unchanged(root, originals, names=None):
     return True
 
 
-def evaluate_profile(profile, *, live=False, allow_exec=False, toolset='baseline',
+def evaluate_profile(profile, *, live=False, allow_exec=False, toolset='workflow',
                      max_steps=15, max_context_chars=200000, model_factory=None):
-    if toolset != 'baseline':
+    if toolset not in {'baseline', 'workflow'}:
         raise ValueError('Invalid evaluation toolset.')
     factory = make_provider if model_factory is None else model_factory
     results = []
@@ -129,7 +129,9 @@ def evaluate_profile(profile, *, live=False, allow_exec=False, toolset='baseline
             with tempfile.TemporaryDirectory(prefix='coding-agent-eval-') as directory:
                 root, checker, originals = create_fixture(Path(directory), task)
                 workspace = Workspace(root, allow_write=task != 'explain')
-                agent = Agent(model, workspace_tools(workspace),
+                runner = (LocalTestRunner(root, [sys.executable, '-B', '-m', 'unittest', 'discover', '-s', 'tests', '-v'])
+                          if toolset == 'workflow' and allow_exec else None)
+                agent = Agent(model, workspace_tools(workspace, enhanced=toolset == 'workflow', test_runner=runner),
                               metrics, max_steps=max_steps, max_context_chars=max_context_chars,
                               mode='plan' if task == 'explain' else 'implement',
                               project_instructions=load_project_instructions(workspace).content)
@@ -162,7 +164,7 @@ def main():
     parser.add_argument('--profiles', type=Path, help='JSON list: provider, model, base_url, api_key_env, name')
     parser.add_argument('--live', action='store_true', help='Permit live model requests (may incur API costs)')
     parser.add_argument('--allow-exec', action='store_true', help='Permit fixture and independent checks on the HOST')
-    parser.add_argument('--toolset', choices=['baseline'], default='baseline')
+    parser.add_argument('--toolset', choices=['baseline', 'workflow', 'both'], default='workflow')
     parser.add_argument('--max-steps', type=int, default=15)
     parser.add_argument('--max-context-chars', type=int, default=200000)
     parser.add_argument('--output', type=Path, help='Write a metadata-only JSON report instead of stdout')

@@ -11,7 +11,7 @@ MODE_INSTRUCTIONS = {
         "Modus IMPLEMENT: Setze die Nutzeraufgabe unter Beachtung des akzeptierten "
         "Plans um, soweit die verfügbaren Werkzeuge dies erlauben. Neuere explizite "
         "Nutzeranweisungen können den Plan ändern. Berichte tatsächliche Änderungen "
-        "und offene Prüfungen. Behaupte keine ausgeführten Tests."
+        "und offene Prüfungen. Testresultate dürfen nur auf tatsächlicher Ausführung beruhen."
     ),
 }
 
