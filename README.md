@@ -44,6 +44,9 @@ Fallback für den OpenAI-Adapter unterstützt.
 
 ## Architektur: Ports and Adapters
 
+Die [ausführliche Architekturdokumentation](docs/architecture.md) erläutert die
+Komponenten, Design Patterns, Datenflüsse und Erweiterungspunkte mit Diagrammen.
+
 ```mermaid
 flowchart TD
     CLI[CLI: Composition Root] --> Agent[Agent-Kern]
