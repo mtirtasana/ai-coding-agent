@@ -29,6 +29,8 @@ interface Session {
   busy: boolean;
   cancelled: boolean;
   cancelling: boolean;
+  generation: number;
+  stopTask?: Promise<void>;
   permissions: Set<string>;
   messages: { role: string; text: string }[];
   checks: { profile: string; result: unknown }[];
@@ -58,6 +60,12 @@ export class Controller
     folder =
       folder || this.selected?.folder || vscode.workspace.workspaceFolders?.[0];
     if (!folder) throw Error("Open a filesystem workspace folder first.");
+    if (
+      !vscode.workspace.workspaceFolders?.some(
+        (f) => f.uri.toString() === folder!.uri.toString(),
+      )
+    )
+      throw Error("Selected workspace folder was removed.");
     const id = folder.uri.toString();
     let session = this.sessions.get(id);
     if (!session) {
@@ -69,6 +77,7 @@ export class Controller
         busy: false,
         cancelled: false,
         cancelling: false,
+        generation: 0,
         permissions: new Set(),
         messages: [],
         checks: [],
@@ -80,6 +89,7 @@ export class Controller
   }
   private async initialize(session: Session, completion = false) {
     this.trusted();
+    const generation = session.generation;
     const existing = completion ? session.completion : session.client;
     if (existing?.running) return existing;
     const cfg = vscode.workspace.getConfiguration(
@@ -96,6 +106,7 @@ export class Controller
     if (session.instructions === undefined)
       session.instructions = await this.loadInstructions(session);
     const python = await this.runtime.ready(provider);
+    if (session.generation !== generation) throw Error("Operation cancelled.");
     const client = new RpcClient(
       python,
       this.context.globalStorageUri.fsPath,
@@ -104,7 +115,10 @@ export class Controller
           session.client === client &&
           session.busy &&
           !session.cancelled &&
-          vscode.workspace.isTrusted;
+          vscode.workspace.isTrusted &&
+          !!vscode.workspace.workspaceFolders?.some(
+            (f) => f.uri.toString() === session.folder.uri.toString(),
+          );
         if (completion || !current()) throw Error("Stale editor request.");
         return this.bridge(session, method, params, current);
       },
@@ -130,6 +144,8 @@ export class Controller
       const baseUrl = cfg.get<string>("baseUrl") || "";
       const keyName = providerKey(provider, baseUrl);
       const key = await this.context.secrets.get(keyName);
+      if (session.generation !== generation)
+        throw Error("Operation cancelled.");
       const model =
         (completion ? cfg.get<string>("inline.model") : undefined) ||
         cfg.get<string>("model") ||
@@ -150,6 +166,8 @@ export class Controller
       if (!completion && session.checkpoint)
         config.checkpoint = session.checkpoint;
       const reply = record(await client.request("initialize", config));
+      if (session.generation !== generation)
+        throw Error("Operation cancelled.");
       if (reply.protocolVersion !== 1 || reply.backendVersion !== "0.8.0")
         throw Error("Incompatible backend. Run backend setup again.");
       return client;
@@ -336,25 +354,41 @@ export class Controller
       return;
     }
     if (message.type === "acceptPlan") {
-      const client = await this.initialize(session);
-      const result = record(await client.request("session/acceptPlan"));
-      session.checkpoint = record(result.checkpoint);
-      session.mode = "implement";
+      const generation = ++session.generation;
+      session.busy = true;
       this.publish();
+      try {
+        const client = await this.initialize(session);
+        if (session.generation !== generation) return;
+        const result = record(await client.request("session/acceptPlan"));
+        if (session.generation !== generation) return;
+        session.checkpoint = record(result.checkpoint);
+        session.mode = "implement";
+      } finally {
+        if (session.generation === generation) session.busy = false;
+        this.publish();
+      }
       return;
     }
     if (message.type === "new") {
-      const instructions = await this.loadInstructions(session);
-      session.instructions = instructions;
-      session.client?.dispose();
-      session.completion?.dispose();
-      session.client = session.completion = undefined;
-      session.checkpoint = undefined;
-      session.messages = [];
-      session.checks = [];
-      session.permissions.clear();
-      session.mode = "plan";
-      this.attachments = [];
+      const generation = ++session.generation;
+      session.busy = true;
+      try {
+        const instructions = await this.loadInstructions(session);
+        if (session.generation !== generation) return;
+        session.instructions = instructions;
+        session.client?.dispose();
+        session.completion?.dispose();
+        session.client = session.completion = undefined;
+        session.checkpoint = undefined;
+        session.messages = [];
+        session.checks = [];
+        session.permissions.clear();
+        session.mode = "plan";
+        this.attachments = [];
+      } finally {
+        if (session.generation === generation) session.busy = false;
+      }
       this.publish();
       return;
     }
@@ -392,22 +426,26 @@ export class Controller
     const session = this.session();
     this.selected = session;
     if (session.busy) throw Error("Agent is busy.");
+    const full = [task, ...this.attachments].join("\n\n");
+    if (full.length > 100000)
+      throw Error("Task and attachments exceed 100,000 characters.");
+    const generation = ++session.generation;
     session.busy = true;
     session.cancelled = false;
-    const full = [task, ...this.attachments].join("\n\n");
     this.attachments = [];
     session.messages.push({ role: "user", text: task });
     this.publish();
     try {
       const client = await this.initialize(session);
-      if (session.cancelled) throw Error("Run cancelled.");
+      if (session.cancelled || session.generation !== generation) return;
       const result = record(
         await client.request("session/run", { task: full, mode: session.mode }),
       );
-      if (session.cancelled) return;
+      if (session.cancelled || session.generation !== generation) return;
       session.checkpoint = record(result.checkpoint);
       session.messages.push({ role: "assistant", text: String(result.text) });
     } catch (e) {
+      if (session.generation !== generation) return;
       session.messages.push({
         role: "status",
         text: session.cancelled
@@ -417,7 +455,8 @@ export class Controller
             : "Run failed.",
       });
     } finally {
-      if (!session.cancelling) session.busy = false;
+      if (session.generation === generation && !session.cancelling)
+        session.busy = false;
       this.publish();
     }
   }
@@ -425,6 +464,18 @@ export class Controller
     const session =
       this.selected || [...this.sessions.values()].find((s) => s.busy);
     if (!session) return;
+    if (session.stopTask) return session.stopTask;
+    const task = this.cancelSession(session);
+    session.stopTask = task;
+    try {
+      await task;
+    } finally {
+      if (session.stopTask === task) session.stopTask = undefined;
+    }
+  }
+  private async cancelSession(session: Session) {
+    const wasBusy = session.busy;
+    session.generation++;
     session.cancelling = true;
     session.busy = true;
     session.cancelled = true;
@@ -463,6 +514,11 @@ export class Controller
     session.completion = undefined;
     session.cancelling = false;
     session.busy = false;
+    if (wasBusy)
+      session.messages.push({
+        role: "status",
+        text: "Run cancelled; accepted edits may remain.",
+      });
     this.publish();
   }
   private async stopAll() {
@@ -541,7 +597,12 @@ export class Controller
     this.trusted();
     const session = this.session();
     const id = `inline:${session.folder.uri}`;
-    const enabled = !this.context.workspaceState.get<boolean>(id, false);
+    const enabled = !(
+      this.context.workspaceState.get<boolean>(id, false) &&
+      vscode.workspace
+        .getConfiguration("genericAgent", session.folder.uri)
+        .get<boolean>("inline.enabled")
+    );
     await this.context.workspaceState.update(id, enabled);
     await vscode.workspace
       .getConfiguration("genericAgent", session.folder.uri)
@@ -774,6 +835,25 @@ export class Controller
       attachmentCount: this.attachments.length,
     });
   }
+  async foldersChanged() {
+    const selected = this.selected;
+    const roots = new Set(
+      (vscode.workspace.workspaceFolders || []).map((f) => f.uri.toString()),
+    );
+    for (const [id, session] of this.sessions) {
+      if (!roots.has(id)) {
+        this.selected = session;
+        await this.stop();
+        this.sessions.delete(id);
+      }
+    }
+    this.selected =
+      selected && roots.has(selected.folder.uri.toString())
+        ? selected
+        : undefined;
+    this.attachments = [];
+    this.publish();
+  }
   async configurationChanged() {
     await this.stopAll();
     for (const s of this.sessions.values()) {
@@ -856,6 +936,9 @@ export function activate(context: vscode.ExtensionContext) {
         void controller.configurationChanged().catch(() => {});
     }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => controller.publish()),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      void controller.foldersChanged().catch(() => {});
+    }),
   );
   return { controller };
 }

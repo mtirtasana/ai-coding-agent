@@ -190,7 +190,7 @@
     "build": "node scripts/build.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
-    "test": "npm run build && node --test --test-isolation=none test/*.test.cjs",
+    "test": "npm run build && node scripts/test.cjs",
     "test:integration": "npm run build && node scripts/integration.cjs",
     "backend": "node scripts/backend.cjs",
     "package": "npm run typecheck && npm run lint && npm run build && npm run backend && node scripts/package.cjs"

@@ -1,6 +1,8 @@
 // test-electron expects npm proxy variables; preserve the configured session proxy.
-if (!process.env.npm_config_https_proxy && process.env.HTTPS_PROXY) process.env.npm_config_https_proxy = process.env.HTTPS_PROXY;
-if (!process.env.npm_config_proxy && process.env.HTTP_PROXY) process.env.npm_config_proxy = process.env.HTTP_PROXY;
+if (!process.env.npm_config_https_proxy && process.env.HTTPS_PROXY)
+  process.env.npm_config_https_proxy = process.env.HTTPS_PROXY;
+if (!process.env.npm_config_proxy && process.env.HTTP_PROXY)
+  process.env.npm_config_proxy = process.env.HTTP_PROXY;
 const {
   runTests,
   downloadAndUnzipVSCode,
@@ -64,7 +66,13 @@ const version = process.env.VSCODE_TEST_VERSION || "stable";
     fs.rmSync(fixture, { recursive: true, force: true });
   },
   (error) => {
-    console.error("VS Code integration failed:", error.name, error.code || "", error.message || "Download or launch failed; check network/proxy and display availability.");
+    console.error(
+      "VS Code integration failed:",
+      error.name,
+      error.code || "",
+      error.message ||
+        "Download or launch failed; check network/proxy and display availability.",
+    );
     fs.rmSync(fixture, { recursive: true, force: true });
     process.exitCode = 1;
   },

@@ -92,6 +92,7 @@ const { sha } = require("../dist/shared.cjs");
 async function fixture(run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agent-editor-"));
   root = { uri: uri(directory), name: "fixture" };
+  vscode.workspace.workspaceFolders = [root];
   docs.clear();
   vscode.workspace.isTrusted = true;
   vscode.workspace.textDocuments = [];
@@ -266,4 +267,106 @@ test("checks need session permission and saved buffers; decline never saves", as
       ),
       false,
     );
+  }));
+
+test("cancel during backend startup cannot submit a late task or overwrite the next checkpoint", async () =>
+  fixture(async (tools) => {
+    const controller = new Controller({ subscriptions: [] });
+    const session = controller.session(root);
+    controller.selected = session;
+    let release;
+    let firstRequests = 0;
+    const firstClient = {
+      request: async () => {
+        firstRequests++;
+        return {};
+      },
+    };
+    const nextCheckpoint = {
+      messages: [],
+      latest_plan: "second plan",
+      accepted_plan: null,
+    };
+    let count = 0;
+    controller.initialize = async () => {
+      if (count++ === 0)
+        return new Promise((resolve) => {
+          release = () => resolve(firstClient);
+        });
+      return {
+        request: async () => ({
+          text: "second result",
+          checkpoint: nextCheckpoint,
+        }),
+      };
+    };
+    const first = controller.run("first task");
+    while (!release) await new Promise((r) => setTimeout(r, 1));
+    await controller.stop();
+    await controller.run("second task");
+    release();
+    await first;
+    assert.equal(firstRequests, 0);
+    assert.deepEqual(session.checkpoint, nextCheckpoint);
+    assert.equal(session.busy, false);
+    assert.equal(
+      session.messages.filter((m) => m.role === "assistant").length,
+      1,
+    );
+  }));
+
+test("managed runtime requires matching wheel marker and SDK; corrupt setup never launches Python", async () =>
+  fixture(async (_tools, dir) => {
+    const storage = path.join(dir, "storage");
+    const backend = path.join(dir, "backend");
+    await fs.mkdir(backend);
+    await fs.mkdir(
+      path.join(
+        storage,
+        "backend-0.8.0",
+        process.platform === "win32" ? "Scripts" : "bin",
+      ),
+      { recursive: true },
+    );
+    const bytes = Buffer.from("test wheel");
+    await fs.writeFile(path.join(backend, "backend.whl"), bytes);
+    await fs.writeFile(
+      path.join(backend, "manifest.json"),
+      JSON.stringify({ file: "backend.whl", sha256: sha(bytes) }),
+    );
+    const controller = new Controller({
+      subscriptions: [],
+      extensionPath: dir,
+      globalStorageUri: uri(storage),
+    });
+    const runtime = controller.runtime;
+    await fs.writeFile(runtime.python, "not executed");
+    await fs.writeFile(
+      path.join(storage, "backend-0.8.0/ready.json"),
+      JSON.stringify({ sha256: sha(bytes), sdk: false }),
+    );
+    assert.equal(await runtime.ready("demo"), runtime.python);
+    await assert.rejects(runtime.ready("openai"), /Set Up/);
+    await fs.writeFile(
+      path.join(storage, "backend-0.8.0/ready.json"),
+      JSON.stringify({ sha256: "mismatch", sdk: true }),
+    );
+    await assert.rejects(runtime.ready("demo"), /Set Up/);
+    await fs.writeFile(path.join(backend, "backend.whl"), "corrupted");
+    let launches = 0;
+    runtime.command = async () => {
+      launches++;
+    };
+    const oldInput = vscode.window.showInputBox;
+    vscode.window.showInputBox = async () => "python";
+    replies.push("Set up backend");
+    try {
+      await assert.rejects(runtime.setup(root.uri), /integrity/);
+      assert.equal(launches, 0);
+      vscode.workspace.isTrusted = false;
+      await assert.rejects(runtime.setup(root.uri), /Trust/);
+      assert.equal(launches, 0);
+    } finally {
+      vscode.window.showInputBox = oldInput;
+    }
   }));
