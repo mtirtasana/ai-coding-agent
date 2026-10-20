@@ -1,6 +1,6 @@
 # Architektur des generischen Coding-Agenten
 
-Diese Dokumentation beschreibt die implementierte Architektur der Version 0.4.
+Diese Dokumentation beschreibt die implementierte Architektur der Version 0.5.
 Sie richtet sich an Entwicklerinnen und Entwickler, die den Agenten verstehen,
 einen Modellanbieter ergänzen oder neue Werkzeuge anbinden möchten.
 
@@ -28,8 +28,9 @@ Aufgabe und einen Workspace. Das Modell entscheidet, welche angebotenen Werkzeug
 es benötigt. Der Agent führt die Aufrufe aus und gibt deren Ergebnisse an das
 Modell zurück, bis eine Abschlussantwort oder ein Limit erreicht ist.
 
-Aktuell gibt es drei Dateiwerkzeuge, Adapter für die OpenAI Responses API und
-Ollamas Chat API sowie eine deterministische Offline-Demo. Der Kern arbeitet
+Aktuell gibt es Datei-, Such-, Snapshot-, Vorschau- und Editierwerkzeuge,
+optionale lokale Testausführung sowie Adapter für OpenAI Responses, Ollama Chat
+und OpenAI-kompatible Chat Completions. Eine Offline-Demo ergänzt die Adapter. Der Kern arbeitet
 synchron und führt Werkzeugaufrufe nacheinander aus. Es gibt einen Agenten pro
 Lauf, keine verteilten Dienste und keine Datenbank. Eine interaktive Sitzung teilt
 abgeschlossene Turns und akzeptierte Pläne im Arbeitsspeicher.
@@ -37,7 +38,8 @@ abgeschlossene Turns und akzeptierte Pläne im Arbeitsspeicher.
 Die Bezeichnung „generisch“ bezieht sich auf austauschbare Modellanbieter und
 bearbeitbare Projekte. Sie bedeutet nicht, dass jedes Modell dieselben Fähigkeiten
 hat: Für die Modelladapter ist Unterstützung für strukturierte Werkzeugaufrufe
-nötig. Das Grundgerüst führt noch keine Tests, Builds oder Git-Befehle selbst aus.
+nötig. Explizit konfigurierte Tests sind möglich; beliebige Modell-Shellbefehle und
+Git-Automation sind nicht implementiert.
 
 ## Design Pattern: Ports and Adapters
 
@@ -289,7 +291,9 @@ besteht aus Nachrichten und expliziten Werkzeugaufrufen.
 Eine Antwort ohne Werkzeugaufrufe gilt als Abschluss, auch wenn ihr Text leer
 ist. Das ist eine Steuerungsentscheidung, kein Nachweis, dass die Nutzeraufgabe
 inhaltlich erfüllt wurde. Die Implementierung hat noch keinen unabhängigen
-Ergebnisprüfer und keine automatische Erfolgsmessung.
+Ergebnisprüfer und keine automatische Erfolgsmessung. Der separate opt-in
+Evaluator prüft Fixture-Ergebnisse unabhängig; dies ist kein allgemeiner Prüfer
+für beliebige Aufgaben im normalen Agent-Zyklus.
 
 Die CLI lädt die Root-`AGENTS.md` automatisch über einen Workspace-Adapter.
 Direkte Kern-Aufrufer liefern `project_instructions` explizit. Regeln und ein
@@ -361,7 +365,7 @@ flowchart TD
     Name -->|Ja| JSON["JSON dekodieren"]
     JSON --> Args{"Objekt, exakte Schlüsselliste und String-Werte?"}
     Args -->|Ja| Handler["Handler aufrufen"]
-    Handler --> OK["ToolResult: ok=true"]
+    Handler --> OK["ToolResult: Handlerstatus oder ok=true bei Text"]
     Name -->|Nein| Error["ToolResult: ok=false"]
     Args -->|Nein| Error
     JSON -->|Dekodierungsfehler| Error
@@ -369,18 +373,22 @@ flowchart TD
 ```
 
 Die Validierung verlangt aktuell exakt die im Schema genannten Schlüssel und
-String-Werte für alle Argumente. Sie ist auf die drei vorhandenen Dateiwerkzeuge
-zugeschnitten; sie ist kein vollständiger JSON-Schema-Validator. Optionale Felder,
+String-Werte für alle Argumente. `run_tests` verwendet ein leeres Argumentobjekt.
+Die Registry ist kein vollständiger JSON-Schema-Validator. Optionale Felder,
 Zahlen, Arrays oder verschachtelte Objekte erfordern eine Erweiterung.
 
 `OSError`, `ValueError`, `KeyError` und `TypeError` werden in Fehlerergebnisse
 umgewandelt. Andere Exceptions werden weitergereicht und beenden den Lauf, wenn
-sie nicht außerhalb der Registry behandelt werden.
+sie nicht außerhalb der Registry behandelt werden. Handler können einen Text
+oder ein explizites `ToolResult` liefern; Testfehler bleiben damit `ok=False`.
 
 ### workspace_tools und Fähigkeiten
 
 `workspace_tools(workspace)` registriert `list_files` und `read_file`.
-Nur bei `workspace.allow_write=True` kommt `write_file` hinzu. Im Lesemodus sieht
+Nur bei `workspace.allow_write=True` kommen `write_file` und `apply_edit` hinzu.
+Standardmäßig ergänzen Suche, Snapshot und Vorschau die ursprünglichen Tools.
+Ein explizit übergebener `LocalTestRunner` registriert `run_tests`; der Planungsmodus
+entfernt alle nicht lesenden Werkzeuge und blockiert erfundene Aufrufe ebenfalls. Im Lesemodus sieht
 das Modell dieses Werkzeug also nicht. Ein trotzdem erzeugter Schreibaufruf wird
 von der Registry abgelehnt. Zusätzlich prüft der Workspace Schreibberechtigung
 noch einmal selbst.
@@ -423,6 +431,9 @@ Schreiboperationen sind weder transaktional noch mit automatischem Rollback
 versehen. Nach einem späteren Fehler bleiben Änderungen bestehen; ein Fehler
 während des Schreibens kann ebenfalls eine teilweise geänderte Datei hinterlassen.
 Dateien sind nach dem Lauf über Git-Diffs und passende Tests zu prüfen.
+Die gezielte Textersetzung im neuen Adapter verwendet Hash-Vergleiche und atomaren
+Dateiersatz. Details und die lokale Testausführung stehen im
+[Workflow-Leitfaden](coding-workflow.md).
 
 ## Kontext, Limits und Fehler
 
@@ -529,9 +540,12 @@ aus. Damit bleiben Konfigurationsdetails außerhalb des Kerns.
 | `task` | Optional; ohne Aufgabe startet das interaktive Terminal |
 | `--mode` | `plan` oder `implement`; Standard interaktiv `plan`, im Einzellauf `implement` |
 | `--workspace` | Aktuelles Arbeitsverzeichnis |
-| `--provider` | `AGENT_PROVIDER`, sonst `openai`; Auswahl `openai`, `ollama`, `demo` |
+| `--provider` | `AGENT_PROVIDER`, sonst `openai`; Auswahl `openai`, `ollama`, `openai-compatible`, `demo` |
 | `--model` | `AGENT_MODEL`; bei OpenAI danach `OPENAI_MODEL`, sonst `gpt-4.1` |
-| `--base-url` | `http://localhost:11434`, nur für Ollama |
+| `--base-url` | Ollama: Standard `http://localhost:11434`; für kompatible APIs explizit erforderlich |
+| `--api-key-env` | `OPENAI_COMPATIBLE_API_KEY` für den kompatiblen Provider |
+| `--allow-exec`, `--test-command` | Gemeinsam erforderlich für lokale Tests |
+| `--test-timeout`, `--test-output-bytes` | 60 Sekunden und 65.536 aufgezeichnete Bytes |
 | `--max-steps` | 15 Modellaufrufe, muss positiv sein |
 | `--max-context-chars` | 200.000 ungefähre Zeichen, muss positiv sein |
 | `--context-mode` | `recent` als Standard, `full` für vollständige Historie und Vergleich |
@@ -625,7 +639,11 @@ Die Terminal- und Sitzungstests prüfen Modusberechtigungen, lokale Befehle,
 Root-Instruktionen, mehrteilige Kontexte und Wiederverwendbarkeit nach Fehlern.
 Ein echter Prompt-Test prüft Tab-Completion mit `prompt-toolkit`.
 
-Der dokumentierte Implementierungsstand besteht aus 56 erfolgreichen lokalen
+Die zusätzlichen Tests prüfen kompatible Chat-Übersetzungen, Suche, gezielte Änderungen,
+Prozessgrenzen und den deterministischen vollständigen Reparaturzyklus. Die Evaluation
+prüft unabhängig vom Abschlusstext des Modells.
+
+Der dokumentierte Implementierungsstand besteht aus 81 erfolgreichen lokalen
 Tests und einem ausgeführten Offline-CLI-Durchlauf. Das belegt die getesteten
 Verträge und Pfade, keine erfolgreiche Kommunikation mit echten Modellservern.
 Live-Tests, Kompatibilitätsprüfungen mehrerer Modelle und eine Überprüfung der
@@ -646,10 +664,10 @@ inhaltlichen Coding-Ergebnisse bleiben separate Aufgaben.
 | Vollständige Dateien statt Patches | Kleiner erster Werkzeugsatz | Unbeabsichtigte Überschreibungen sind möglich |
 | Metadaten statt vollständiger Gesprächslogs | Kleine, einfache Ereignisausgabe | Keine automatische Wiederaufnahme oder vollständige Rekonstruktion |
 
-Sinnvolle nächste Ausbaustufen sind eine gezielte Patch-Anwendung, kontrollierte
-Testprozesse in isolierten Workspaces und automatische Auswahl relevanter
-Projektdateien. Bei Testausführung müssen zugleich die Systemanweisungen, neue
-Werkzeugverträge, Prozesslimits und Fehlerbehandlung angepasst werden.
+Gezielte Textersetzung und begrenzte lokale Testprozesse sind in Version 0.5
+umgesetzt. Sinnvolle nächste Ausbaustufen sind isolierte Ausführung, belastbare
+Live-Evaluation, Persistenz und relevanzbasierte Dateiauswahl. Der
+[Workflow-Leitfaden](coding-workflow.md) beschreibt die aktuellen Grenzen.
 
 Git-Funktionen, Container-Workspaces und ein Anthropic-Adapter können danach an
 den vorhandenen Grenzen ergänzt werden. Multi-Agent-Orchestrierung ist kein
@@ -661,3 +679,23 @@ Der [Vorschlag für Kontextverwaltung und SQLite-Persistenz](context-and-persist
 beschreibt den weiteren Ausbau mit Speicher-Ports, Datenmodell und Cache-Invalidierung.
 Regelbasierte Kontextauswahl und Nutzungsmessung sind bereits implementiert;
 SQLite, Zusammenfassungen und Artefaktauswahl bleiben Vorschläge.
+
+## OpenAI-kompatible Endpoints und Evaluation
+
+`OpenAICompatibleProvider` implementiert denselben Modell-Port über Chat Completions.
+Es gibt keinen automatischen API- oder Provider-Fallback. Der Konfigurationsvertrag
+besteht aus Modell, Basis-URL und dem Namen einer Schlüssel-Umgebungsvariablen.
+`agent.evaluate` vergleicht ursprüngliche und erweiterte Werkzeuge an denselben
+Fixtures. Reports enthalten Metriken und kontrollierte Statuscodes, keine Rohdialoge.
+
+```mermaid
+flowchart TD
+    Core[Agent-Kern] --> Policy[Modusberechtigungen]
+    Policy --> Tools[Werkzeugregistry]
+    Tools --> Editing[Suche, Snapshot, Diff und Ersetzung]
+    Tools --> Execution[Konfigurierter Host-Testprozess]
+    Core --> Providers[OpenAI, Ollama, kompatible API]
+    Eval[Opt-in Evaluation] --> Core
+    Eval --> Check[Unabhängiger Fixture-Checker]
+    Check --> Report[Metadatenreport]
+```

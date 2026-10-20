@@ -59,3 +59,20 @@ class CliTests(unittest.TestCase):
                 self.invoke('Inspect', '--provider', 'demo', '--workspace', directory)
             self.assertEqual(raised.exception.code, 1)
             model.assert_not_called()
+
+    def test_execution_requires_both_configuration_and_permission(self):
+        for flags in [('--allow-exec',), ('--test-command', 'python -m unittest')]:
+            with self.assertRaises(SystemExit) as result:
+                self.invoke('Inspect', '--provider', 'demo', *flags)
+            self.assertEqual(result.exception.code, 2)
+
+    def test_compatible_cli_selects_endpoint_and_key_environment(self):
+        from agent.adapters.models import DemoProvider
+        provider = DemoProvider()
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict('os.environ', {'TEST_COMPATIBLE_KEY': 'test-only'}), \
+                patch('agent.cli.OpenAICompatibleProvider', return_value=provider) as factory:
+            self.invoke('Inspect', '--provider', 'openai-compatible', '--model', 'local-test',
+                        '--base-url', 'http://localhost:1234/v1', '--api-key-env', 'TEST_COMPATIBLE_KEY',
+                        '--workspace', directory)
+        factory.assert_called_once_with('local-test', 'http://localhost:1234/v1', 'test-only')

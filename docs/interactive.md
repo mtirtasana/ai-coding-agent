@@ -1,6 +1,6 @@
 # Interactive terminal, modes, and project instructions
 
-Version 0.4 adds a shared in-memory conversation, Tab-completed commands, enforced
+Since version 0.4 the agent supports a shared in-memory conversation, Tab-completed commands, enforced
 planning permissions, and automatic workspace-root `AGENTS.md` loading. The same
 agent core and provider adapters serve both interactive and single-task usage.
 
@@ -49,15 +49,15 @@ Single-task CLI arguments are ordinary tasks, not slash-command input.
 Example session:
 
 ```text
-[plan | read-only] > /plan Add a configuration loader and propose tests
+[plan | read-only | tests:off] > /plan Add a configuration loader and propose tests
 ...reviewable plan...
-[plan | read-only] > /implement
+[plan | read-only | tests:off] > /implement
 Implementation mode. Waiting for your next task.
-[implement | write] > Implement the plan, keeping the public API stable
+[implement | write | tests:off] > Implement the plan, keeping the public API stable
 ...changes and outstanding verification...
-[implement | write] > /instructions
+[implement | write | tests:off] > /instructions
 ...loaded AGENTS.md snapshot...
-[implement | write] > /new
+[implement | write | tests:off] > /new
 New conversation. Instructions reloaded; mode is plan.
 ```
 
@@ -205,7 +205,8 @@ session checkpoint.
 
 History, proposed plans, accepted plans, and prompt input history live only in
 memory. There is no SQLite store, disk prompt history, restart resume, automatic
-plan execution, or test-execution tool in this version. Shell redirection or
+plan execution, or automatic execution of arbitrary commands. Version 0.5 adds the explicitly configured
+`run_tests` tool; see the [coding workflow guide](coding-workflow.md). Shell redirection or
 external terminal recording may still retain output.
 
 ## Tests
@@ -217,3 +218,11 @@ interruption recovery, and CLI defaults. A real `prompt-toolkit` prompt is fed
 `/pl`, Tab, and Enter to verify completion. That one test skips if the optional
 terminal dependency is missing; GitHub Actions installs the terminal extra so it
 runs there. No live model credentials are needed.
+
+## Version 0.5: verification capability
+
+`--allow-exec` and `--test-command` enable the local test tool together. The prompt
+shows `tests:on/off` separately from file-edit permission. Planning always has
+tests off. Process execution has host access and can modify files even when
+file-write tools are disabled. `/implement` still switches and waits; it never
+starts tests automatically.

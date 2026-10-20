@@ -65,6 +65,41 @@ Zugangsdaten. Standardanbieter ist für bestehende Aufrufe weiterhin `openai`.
 `AGENT_PROVIDER` und `AGENT_MODEL` setzen Defaults; `OPENAI_MODEL` bleibt als
 Fallback für den OpenAI-Adapter unterstützt.
 
+## Suchen, gezielt ändern und Tests ausführen
+
+Der Agent kann mit `search_text` nach Literaltext suchen, per `file_snapshot`
+Dateiinhalte und Hash lesen und Änderungen mit `preview_edit`/`apply_edit`
+gezielt vorbereiten und anwenden. Veraltete oder mehrdeutige Änderungen werden abgewiesen.
+
+```bash
+coding-agent --provider ollama --model MODELLNAME --allow-write \
+  --allow-exec --test-command 'python -m unittest discover -s tests -v'
+```
+
+`run_tests` führt ausschließlich den ausdrücklich konfigurierten Befehl aus.
+Planungsmodus bleibt ohne Ausführung. Das ist lokale Ausführung mit Host-Rechten,
+keine Sandbox; Testcode kann auch unabhängig von `--allow-write` Dateien ändern.
+Standardlimits sind 60 Sekunden und 64 KiB aufgezeichnete Ausgabe.
+
+OpenAI-kompatible Server werden separat über Chat Completions unterstützt:
+
+```bash
+# OPENAI_COMPATIBLE_API_KEY vorher in der Umgebung setzen.
+coding-agent --provider openai-compatible --model MODELLNAME \
+  --base-url http://localhost:1234/v1 --allow-write
+```
+
+Dafür ist das optionale OpenAI-SDK nötig; der Server muss Tool Calling unterstützen.
+Native OpenAI verwendet weiterhin Responses. Es gibt keinen automatischen API-Fallback.
+
+Die [Workflow-Dokumentation](docs/coding-workflow.md) erklärt Tools, Prozesslimits,
+Providerkonfiguration und die opt-in Live-Evaluation für OpenAI, Ollama und kompatible
+Endpoints. Ohne `--live` macht die Evaluation keine Modellaufrufe:
+
+```bash
+python -m agent.evaluate --toolset both --output evaluation-report.json
+```
+
 ## Architektur: Ports and Adapters
 
 Die [ausführliche Architekturdokumentation](docs/architecture.md) erläutert die
@@ -88,6 +123,7 @@ flowchart TD
     Policy --> Tools[ToolExecutor-Port]
     Tools --> Registry[ToolRegistry]
     Registry --> Workspace[Lokaler Workspace]
+    Registry --> Tests[Konfigurierter lokaler Testprozess]
     Agent --> Events[EventSink-Port]
     Events --> JSONL[JSONL-Ereignisse]
 ```
@@ -99,6 +135,9 @@ flowchart TD
 - `agent/core/policy.py`: lesende Werkzeuge im Planungsmodus erzwingen.
 - `agent/terminal.py`: interaktive Eingabe, Slash-Befehle und gemeinsame Sitzung.
 - `agent/adapters/instructions.py`: Root-`AGENTS.md` als geprüften Snapshot laden.
+- `agent/adapters/editing.py`: begrenzte Suche und hashgeprüfte atomare Textersetzung.
+- `agent/adapters/execution.py`: konfigurierter lokaler Prozess mit Zeit-/Ausgabelimit.
+- `agent/evaluate.py`: opt-in Fixture-Evaluation mit unabhängiger Prüfung.
 - `agent/adapters/models.py`: Übersetzung zwischen internen Typen und Anbieterformaten.
 - `agent/adapters/tools.py`: Werkzeugregistrierung, String-Argumentvalidierung und Fehlerergebnisse.
 - `agent/files.py`: lokaler Workspace mit bestehenden Pfadbeschränkungen.
@@ -117,8 +156,9 @@ bei anderen Argumenttypen als Strings muss die Validierung erweitert werden.
 
 Standardmäßig sind nur `list_files` und `read_file` verfügbar. `--allow-write`
 schaltet `write_file` hinzu; dabei können Dateien vollständig ersetzt werden.
-Patch-Anwendung, Testprozesse, Git-Werkzeuge, Container-Isolation, Anthropic-Adapter
-und automatische Auswahl relevanter Dateiabschnitte sind noch nicht implementiert.
+Gezielte Textersetzung und konfigurierte Testprozesse sind vorhanden. Allgemeine
+Patch-Anwendung, Git-Werkzeuge, Container-Isolation, Anthropic-Adapter und automatische
+relevanzbasierte Auswahl von Dateiabschnitten sind noch nicht implementiert.
 
 `--max-steps 15` begrenzt Modellaufrufe. `--max-context-chars 200000` begrenzt den
 ungefähren Zeichenumfang vor dem nächsten Aufruf, keine Tokens oder Kosten.
@@ -153,8 +193,8 @@ Aufgelöste Pfade müssen im Workspace liegen. `.git`, `.ssh`, `.aws` und Namen
 beginnend mit `.env` sind gesperrt. Das ist keine Betriebssystem-Sandbox und schützt
 nicht gegen gleichzeitig manipulierte Symlinks. Eine isolierte Arbeitskopie ohne
 Geheimnisse verwenden. Gelesene Inhalte werden an den gewählten Modellserver
-übermittelt. Änderungen mit `git diff` prüfen. Der Agent kann keine Tests ausführen
-und darf deshalb keine erfolgreiche Testausführung behaupten.
+übermittelt. Änderungen mit `git diff` prüfen. Der Agent darf Tests nur bei explizit
+aktiviertem `run_tests` ausführen und Ergebnisse nur auf tatsächliche Ausführung stützen.
 
 ## Entwicklung und Prüfungen
 

@@ -55,11 +55,12 @@ def create_prompt_session(**kwargs):
 
 
 class InteractiveShell:
-    def __init__(self, workspace, agent_factory, mode="plan", output=print):
+    def __init__(self, workspace, agent_factory, mode="plan", output=print, execution_enabled=False):
         if mode not in {"plan", "implement"}:
             raise ValueError("Mode must be plan or implement.")
         self.workspace, self.agent_factory, self.mode = workspace, agent_factory, mode
         self.output = output
+        self.execution_enabled = execution_enabled
         self.state = ConversationState()
         self.instructions = load_project_instructions(workspace)
 
@@ -69,7 +70,8 @@ class InteractiveShell:
 
     @property
     def prompt(self):
-        return f"[{self.mode} | {'write' if self.writable else 'read-only'}] > "
+        tests = 'on' if self.execution_enabled and self.mode == 'implement' else 'off'
+        return f"[{self.mode} | {'write' if self.writable else 'read-only'} | tests:{tests}] > "
 
     def submit(self, task):
         try:
