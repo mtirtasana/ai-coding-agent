@@ -1,6 +1,6 @@
 # Component reference and scientific rationale
 
-**Scope:** version 0.7.0 and the bug fixes documented in PR #1. This is an
+**Core baseline:** version 0.7.0 and the bug fixes documented in PR #1. This is an
 explanation of implemented behavior, not a specification of future features.
 Source inspection baseline: [commit 0f7ded1](https://github.com/mtirtasana/ai-coding-agent/commit/0f7ded187c27b70cc439bace4fe311d9e3935992),
 recorded 2026-10-20. Source links below track the checked-out branch; use the
@@ -8,6 +8,11 @@ baseline commit for reproducible comparisons.
 
 The [documentation index](README.md) gives shorter operational reading paths;
 the [ADRs](adr/README.md) explain why these choices were made.
+
+Version 0.8 adds optional core cancellation and the editor adapter described in
+[VS Code extension architecture](vscode-extension.md), with separate completion
+workers and reviewed buffer operations. The following baseline still explains the
+CLI/core; its earlier validation snapshot is historical.
 
 ## 1. Problem, terminology and evidence
 

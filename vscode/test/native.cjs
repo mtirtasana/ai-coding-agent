@@ -1,0 +1,111 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const vscode = require("vscode");
+const crypto = require("node:crypto");
+const hash = (s) => crypto.createHash("sha256").update(s).digest("hex");
+exports.run = async () => {
+  const ext = vscode.extensions.getExtension("mtirtasana.generic-coding-agent");
+  assert(ext, "Extension is installed");
+  const { controller } = await ext.activate();
+  assert(controller);
+  const folder = vscode.workspace.workspaceFolders[0];
+  const session = controller.session(folder);
+  controller.selected = session;
+  const tools = session.tools;
+  const file = path.join(folder.uri.fsPath, "review.py");
+  await fs.writeFile(file, "value = 1\n");
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+  let editor = await vscode.window.showTextDocument(doc);
+  await editor.edit((builder) =>
+    builder.insert(new vscode.Position(0, 0), "# unsaved\n"),
+  );
+  const snapshot = JSON.parse(
+    (
+      await tools.execute(
+        "file_snapshot",
+        { path: "review.py" },
+        "plan",
+        () => true,
+      )
+    ).content,
+  );
+  assert(snapshot.content.startsWith("# unsaved"));
+  assert.equal(snapshot.sha256, hash(doc.getText()));
+  const denied = await tools.execute(
+    "apply_edit",
+    {
+      path: "review.py",
+      expected_sha256: snapshot.sha256,
+      old_text: "value = 1",
+      new_text: "value = 2",
+    },
+    "plan",
+    () => true,
+  );
+  assert.equal(denied.ok, false);
+  const pending = tools.execute(
+    "apply_edit",
+    {
+      path: "review.py",
+      expected_sha256: snapshot.sha256,
+      old_text: "value = 1",
+      new_text: "value = 2",
+    },
+    "implement",
+    () => true,
+  );
+  for (let i = 0; i < 200 && !tools.proposals.size; i++)
+    await new Promise((r) => setTimeout(r, 10));
+  assert.equal(tools.proposals.size, 1);
+  assert(doc.getText().includes("value = 1"));
+  await tools.decide([...tools.proposals.keys()][0], true);
+  const applied = await pending;
+  assert.equal(applied.ok, true, applied.content);
+  assert(doc.getText().includes("value = 2"));
+  assert(doc.isDirty);
+  assert.equal(await fs.readFile(file, "utf8"), "value = 1\n");
+  editor = await vscode.window.showTextDocument(doc);
+  await vscode.commands.executeCommand("undo");
+  assert(doc.getText().includes("value = 1"));
+  const second = tools.execute(
+    "write_file",
+    { path: "review.py", content: "do not write\n" },
+    "implement",
+    () => true,
+  );
+  for (let i = 0; i < 200 && !tools.proposals.size; i++)
+    await new Promise((r) => setTimeout(r, 10));
+  tools.cancel();
+  assert.equal((await second).ok, false);
+  assert(!doc.getText().includes("do not write"));
+  const collection =
+    vscode.languages.createDiagnosticCollection("agent-native-test");
+  collection.set(doc.uri, [
+    new vscode.Diagnostic(
+      new vscode.Range(0, 0, 0, 1),
+      "Example diagnostic",
+      vscode.DiagnosticSeverity.Warning,
+    ),
+  ]);
+  const items = controller.diagnosticItems();
+  assert(items.some((d) => d.message === "Example diagnostic"));
+  collection.dispose();
+  assert.equal(
+    (
+      await tools.execute(
+        "read_file",
+        { path: "../outside" },
+        "plan",
+        () => true,
+      )
+    ).ok,
+    false,
+  );
+  console.log(
+    "Native VS Code tests passed: activation, dirty snapshots, planning denial, reviewed apply, unsaved buffers, Undo, rejection, diagnostics and path guards.",
+  );
+  await vscode.window.showTextDocument(doc);
+  await vscode.commands.executeCommand("workbench.action.files.revert");
+  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+};

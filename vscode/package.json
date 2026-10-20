@@ -1,0 +1,209 @@
+{
+  "name": "generic-coding-agent",
+  "displayName": "Generic Coding Agent",
+  "description": "Provider-independent planning, reviewed edits, verification and inline suggestions.",
+  "version": "0.1.0",
+  "publisher": "mtirtasana",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mtirtasana/ai-coding-agent"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:genericAgent.sidebar",
+    "onCommand:genericAgent.complete"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Setup, model requests, edits and commands require a trusted workspace.",
+      "restrictedConfigurations": [
+        "genericAgent.pythonPath",
+        "genericAgent.checks",
+        "genericAgent.baseUrl"
+      ]
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "genericAgent",
+          "title": "Coding Agent",
+          "icon": "media/agent.svg"
+        }
+      ]
+    },
+    "views": {
+      "genericAgent": [
+        {
+          "type": "webview",
+          "id": "genericAgent.sidebar",
+          "name": "Coding Agent"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "genericAgent.setup",
+        "title": "Coding Agent: Set Up / Update Backend"
+      },
+      {
+        "command": "genericAgent.configure",
+        "title": "Coding Agent: Configure Provider"
+      },
+      {
+        "command": "genericAgent.open",
+        "title": "Coding Agent: Open Sidebar"
+      },
+      {
+        "command": "genericAgent.stop",
+        "title": "Coding Agent: Stop"
+      },
+      {
+        "command": "genericAgent.complete",
+        "title": "Coding Agent: Suggest Inline Completion"
+      },
+      {
+        "command": "genericAgent.toggleInline",
+        "title": "Coding Agent: Toggle Automatic Completions"
+      },
+      {
+        "command": "genericAgent.explainDiagnostic",
+        "title": "Coding Agent: Explain Diagnostic"
+      },
+      {
+        "command": "genericAgent.fixDiagnostic",
+        "title": "Coding Agent: Propose Diagnostic Fix"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "genericAgent.complete",
+        "key": "ctrl+alt+space",
+        "mac": "cmd+alt+space",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Generic Coding Agent",
+      "properties": {
+        "genericAgent.provider": {
+          "type": "string",
+          "enum": [
+            "demo",
+            "openai",
+            "ollama",
+            "openai-compatible"
+          ],
+          "default": "demo",
+          "scope": "resource",
+          "description": "Backend provider. Demo performs no model requests."
+        },
+        "genericAgent.model": {
+          "type": "string",
+          "default": "",
+          "scope": "resource"
+        },
+        "genericAgent.baseUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Ollama or compatible endpoint; never include credentials."
+        },
+        "genericAgent.pythonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Python 3.11+ interpreter used to create the managed environment."
+        },
+        "genericAgent.maxSteps": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 15,
+          "scope": "resource"
+        },
+        "genericAgent.maxContextChars": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 200000,
+          "scope": "resource"
+        },
+        "genericAgent.inline.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Opt in to automatic active-document model requests."
+        },
+        "genericAgent.inline.model": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Optional completion model on the same provider/endpoint."
+        },
+        "genericAgent.checks": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "description": "Explicit test/lint/security/dependency_audit profiles: command argv, timeout, outputLimit. Requires session permission.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "timeout": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "outputLimit": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "npm run build && node --test --test-isolation=none test/*.test.cjs",
+    "test:integration": "npm run build && node scripts/integration.cjs",
+    "backend": "node scripts/backend.cjs",
+    "package": "npm run typecheck && npm run lint && npm run build && npm run backend && node scripts/package.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.95.0",
+    "@vscode/test-electron": "^2.5.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "prettier": "^3.0.0",
+    "jsdom": "^27.0.0"
+  }
+}

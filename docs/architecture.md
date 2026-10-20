@@ -1,6 +1,6 @@
 # Architektur des generischen Coding-Agenten
 
-Diese Dokumentation beschreibt die implementierte Architektur der Version 0.7.
+Diese Dokumentation beschreibt die implementierte Architektur der Version 0.8.
 Sie richtet sich an Entwicklerinnen und Entwickler, die den Agenten verstehen,
 einen Modellanbieter ergänzen oder neue Werkzeuge anbinden möchten.
 
@@ -740,3 +740,12 @@ mehr leeren. Der Prozessadapter erfasst Fehler des Ausgabe-Threads in
 fehlerfreie Ausgabeerfassung. Laufende Prozesse werden bei Leserfehlern beendet.
 Bei abgelehnten Ollama-Weiterleitungen schließt der Adapter die HTTP-Antwort,
 bevor er den Fehler zurückgibt.
+
+
+## VS Code-Adapter (Version 0.8)
+
+Die [Editor-Architektur](vscode-extension.md) beschreibt das TypeScript-Frontend,
+JSON-RPC über stdio, verwaltetes Python-Backend, Pufferbesitz, einzeln bestätigte
+Änderungen, Abbruch und getrennte Completion-Worker. Die CLI bleibt verfügbar.
+Der Agent und der lokale Prozessadapter akzeptieren optional einen CancellationToken;
+Provider können für Inline-Vorschläge Zeit-/Ausgabelimits erhalten.

@@ -4,6 +4,16 @@ Ein Python-Grundgerüst mit einem anbieterunabhängigen Agent-Kern. Modelle und
 Werkzeuge werden über Schnittstellen eingebunden. Keine ChatGPT-Mitgliedschaft
 nötig. Python 3.11 oder neuer ist erforderlich.
 
+## VS Code-Erweiterung
+
+Die [VS Code-Erweiterung](vscode/README.md) ergänzt eine eigene Seitenleiste,
+Planung, einzeln bestätigte Änderungen mit Undo, konfigurierte Prüfungen,
+optionale Inline-Vorschläge und vorhandene Editor-Diagnosen. Sie verwendet einen
+explizit eingerichteten Python-Backend-Prozess auf dem Workspace-Host und läuft
+auch in der Architektur von SSH, WSL und Dev Containers. Die tatsächlichen Remote-
+Umgebungen benötigen eigene Smoke-Tests. Installation über das erzeugte VSIX;
+keine Marketplace-Veröffentlichung. Architektur: [Editor-Integration](docs/vscode-extension.md).
+
 ## Schnellstart ohne API oder Modell
 
 ```bash
@@ -124,7 +134,7 @@ Komponenten, Design Patterns, Datenflüsse und Erweiterungspunkte mit Diagrammen
 
 Die neue englische [Komponentenreferenz](docs/components.md) erklärt Verträge,
 Algorithmen, Fehlerfälle, formale Modelle und wissenschaftliche Aussagegrenzen.
-Die [12 Architecture Decision Records](docs/adr/README.md) dokumentieren Gründe,
+Die [Architecture Decision Records](docs/adr/README.md) dokumentieren Gründe,
 Alternativen, Konsequenzen und Kriterien für spätere Änderungen.
 Der [Dokumentationsindex](docs/README.md) bietet passende Lesepfade.
 

@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict
 
+from .cancellation import CancellationToken
 from .context import ContextLimitError, RuleBasedContextBuilder
 from .ports import ContextBuilder, EventSink, ModelProvider, ToolExecutor
 from .policy import MODE_INSTRUCTIONS, ModeToolExecutor
@@ -37,9 +38,11 @@ class Agent:
                  events: EventSink | None = None, max_steps: int = 15,
                  max_context_chars: int = 200_000,
                  context_builder: ContextBuilder | None = None,
-                 mode: str = "implement", project_instructions: str = ""):
+                 mode: str = "implement", project_instructions: str = "",
+                 cancellation: CancellationToken | None = None):
         if max_steps < 1 or max_context_chars < 1:
             raise ValueError("Schritt- und Kontextlimit müssen positiv sein.")
+        self.cancellation = cancellation or CancellationToken()
         self.model, self.tools, self.events = model, ModeToolExecutor(tools, mode), events
         self.mode, self.project_instructions = mode, project_instructions
         self.max_steps, self.max_context_chars = max_steps, max_context_chars
@@ -66,6 +69,7 @@ class Agent:
         requests = []
         self.emit("run_started", max_steps=self.max_steps, mode=self.mode)
         for step in range(1, self.max_steps + 1):
+            self.cancellation.check()
             try:
                 selection = self.context_builder.build(tuple(messages), specs, self.max_context_chars)
             except ContextLimitError:
@@ -73,6 +77,7 @@ class Agent:
                 raise
             self.emit("context_selected", step=step, **asdict(selection.stats))
             model_response = self.model.generate(selection.messages, specs)
+            self.cancellation.check()
             response = model_response.message
             if response.role != "assistant":
                 raise ValueError("Modell muss eine Assistant-Nachricht liefern.")
@@ -85,12 +90,14 @@ class Agent:
                       usage=asdict(model_response.usage) if model_response.usage is not None else None)
             if not response.tool_calls:
                 self.emit("run_completed", steps=step)
-                if state is not None:
-                    state.messages = list(messages[fixed_count:])
-                    if self.mode == "plan":
-                        state.latest_plan = response.content
+                with self.cancellation.guard():
+                    if state is not None:
+                        state.messages = list(messages[fixed_count:])
+                        if self.mode == "plan":
+                            state.latest_plan = response.content
                 return RunResult(response.content, step, messages, requests)
             for call in response.tool_calls:
+                self.cancellation.check()
                 result = self.tools.execute(call)
                 messages.append(Message("tool", json.dumps(
                     {"ok": result.ok, "content": result.content}, ensure_ascii=False),

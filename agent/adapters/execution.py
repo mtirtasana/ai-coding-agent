@@ -9,11 +9,13 @@ import threading
 import time
 from pathlib import Path
 
+from agent.core.cancellation import CancellationToken
 from agent.core.types import ToolResult
 
 
 class LocalCommandRunner:
-    def __init__(self, root: Path, command, timeout=60, output_limit=65536, *, check='test'):
+    def __init__(self, root: Path, command, timeout=60, output_limit=65536, *, check='test', cancellation=None):
+        self.cancellation = cancellation or CancellationToken()
         self.root = root.resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError("Verification working directory must be a directory.")
@@ -48,10 +50,12 @@ class LocalCommandRunner:
     def run(self):
         started = time.monotonic()
         # Only host-configured argv reaches this call; model tools cannot supply commands.
-        process = subprocess.Popen(self.command, cwd=self.root, stdin=subprocess.DEVNULL,  # nosec B603
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False,
-                                   start_new_session=os.name != 'nt',
-                                   creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)
+        with self.cancellation.guard():
+            process = subprocess.Popen(self.command, cwd=self.root, stdin=subprocess.DEVNULL,  # nosec B603
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=False,
+                                       start_new_session=os.name != 'nt',
+                                       creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0)
+            self.cancellation.track(process)
         captured = bytearray()
         done = threading.Event()
         truncated = False
@@ -78,7 +82,7 @@ class LocalCommandRunner:
         try:
             reader.start()
             while process.poll() is None or not done.is_set():
-                if capture_error is not None:
+                if capture_error is not None or self.cancellation.cancelled:
                     self._stop(process)
                     break
                 remaining = self.timeout - (time.monotonic() - started)
@@ -103,12 +107,14 @@ class LocalCommandRunner:
                 reader.join(timeout=2)
             if done.is_set() or reader.ident is None:
                 process.stdout.close()
+            if process.poll() is not None:
+                self.cancellation.release(process)
         capture_complete = done.is_set() and capture_error is None
-        return {'check': self.check, 'passed': process.returncode == 0 and not timed_out and capture_complete,
+        return {'check': self.check, 'passed': process.returncode == 0 and not timed_out and capture_complete and not self.cancellation.cancelled,
                 'exit_code': process.returncode, 'output': bytes(captured).decode('utf-8', errors='replace'),
                 'elapsed_seconds': round(time.monotonic() - started, 6), 'timed_out': timed_out,
                 'output_truncated': truncated, 'capture_complete': capture_complete,
-                'capture_error': capture_error}
+                'capture_error': capture_error, 'cancelled': self.cancellation.cancelled}
 
     def as_tool(self):
         result = self.run()

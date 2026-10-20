@@ -11,11 +11,12 @@ def token_count(value):
 
 class OpenAIProvider:
     """OpenAI Responses API; SDK wird nur beim Erstellen dieses Adapters geladen."""
-    def __init__(self, model: str, client=None):
+    def __init__(self, model: str, client=None, *, timeout=None, max_output_tokens=None):
         if client is None:
             from openai import OpenAI
-            client = OpenAI()
+            client = OpenAI() if timeout is None else OpenAI(timeout=timeout, max_retries=0)
         self.client, self.model = client, model
+        self.max_output_tokens = max_output_tokens
 
     def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse:
         items = []
@@ -29,7 +30,9 @@ class OpenAIProvider:
                 items.extend({"type": "function_call", "call_id": c.id,
                               "name": c.name, "arguments": c.arguments}
                              for c in message.tool_calls)
+        options = {} if self.max_output_tokens is None else {"max_output_tokens": self.max_output_tokens}
         response = self.client.responses.create(
+            **options,
             model=self.model, input=items, store=False,
             tools=[{"type": "function", "name": t.name, "description": t.description,
                     "parameters": t.parameters, "strict": True} for t in tools])
@@ -49,13 +52,14 @@ class OpenAIProvider:
 class OllamaProvider:
     """Lokale Ollama Chat API mit Werkzeugaufrufen; nur Standardbibliothek."""
     def __init__(self, model: str, base_url: str = "http://localhost:11434",
-                 timeout: float = 120):
+                 timeout: float = 120, *, max_output_tokens=None):
         from urllib.parse import urlsplit
         url = urlsplit(base_url)
         if (url.scheme not in {"http", "https"} or not url.hostname
                 or url.username or url.password or url.query or url.fragment):
             raise ValueError("Base URL must be HTTP(S), without credentials, query or fragment.")
         self.model, self.base_url, self.timeout = model, base_url.rstrip("/"), timeout
+        self.max_output_tokens = max_output_tokens
 
     def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse:
         import json
@@ -82,6 +86,8 @@ class OllamaProvider:
                    "tools": [{"type": "function", "function": {
                        "name": t.name, "description": t.description,
                        "parameters": t.parameters}} for t in tools]}
+        if self.max_output_tokens is not None:
+            payload["options"] = {"num_predict": self.max_output_tokens}
         request = Request(self.base_url + "/api/chat", data=json.dumps(payload).encode(),
                           headers={"Content-Type": "application/json"})
         with build_opener(NoRedirect()).open(request, timeout=self.timeout) as response:
@@ -101,7 +107,7 @@ class OllamaProvider:
 
 class OpenAICompatibleProvider:
     """Chat Completions with tool calling; no Responses fallback or SDK retries."""
-    def __init__(self, model: str, base_url: str, api_key: str, client=None):
+    def __init__(self, model: str, base_url: str, api_key: str, client=None, *, timeout=120, max_output_tokens=None):
         from urllib.parse import urlsplit
         url = urlsplit(base_url)
         if (url.scheme not in {"http", "https"} or not url.hostname
@@ -111,8 +117,9 @@ class OpenAICompatibleProvider:
             raise ValueError("Compatible provider requires a model and an API key.")
         if client is None:
             from openai import OpenAI
-            client = OpenAI(base_url=base_url, api_key=api_key, timeout=120, max_retries=0)
+            client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout, max_retries=0)
         self.client, self.model = client, model
+        self.max_output_tokens = max_output_tokens
 
     def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse:
         items = []
@@ -130,6 +137,8 @@ class OpenAICompatibleProvider:
             kwargs["tools"] = [{"type": "function", "function": {
                 "name": tool.name, "description": tool.description,
                 "parameters": tool.parameters}} for tool in tools]
+        if self.max_output_tokens is not None:
+            kwargs["max_tokens"] = self.max_output_tokens
         response = self.client.chat.completions.create(**kwargs)
         result = response.choices[0].message
         calls = tuple(ToolCall(call.id, call.function.name, call.function.arguments)

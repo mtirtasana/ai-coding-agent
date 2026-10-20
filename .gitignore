@@ -7,3 +7,9 @@ __pycache__/
 build/
 dist/
 .ruff_cache/
+node_modules/
+vscode/dist/
+vscode/backend/*.whl
+vscode/backend/manifest.json
+vscode/*.vsix
+vscode/.vscode-test/

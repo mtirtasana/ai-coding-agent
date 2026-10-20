@@ -9,3 +9,7 @@
 - Security mit `python -m bandit -r agent`; Abhängigkeiten mit `python -m pip_audit --skip-editable` prüfen (`.[security]`).
 - Bandit-Ausnahmen nur einzeln mit Begründung in `docs/security-checks.md`; keine pauschalen Regel- oder Advisory-Ausnahmen.
 - Ohne tatsächliche Ausführung keine erfolgreichen Tests behaupten.
+
+- VS Code: `cd vscode && npm ci && npm run typecheck && npm run lint && npm test`.
+- Für den echten stdio-Test muss `AGENT_TEST_PYTHON` auf einen Interpreter mit installiertem Root-Projekt zeigen.
+- VSIX mit `npm run package`; native Editor-Tests mit `npm run test:integration` (Linux benötigt einen Display-Server).

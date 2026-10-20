@@ -28,8 +28,13 @@ formal review process that did not occur.
 | [0010](0010-separate-verification-evidence.md) | Keep verification outcomes separate | Accepted | Tests, lint, security, audit and CI |
 | [0011](0011-metrics-and-independent-evaluation.md) | Report measured usage and independently checked fixtures | Accepted | Events and evaluation |
 | [0012](0012-defer-persistence-and-caching.md) | Defer durable persistence and caching | Accepted deferral | In-memory state and future storage |
+| [0013](0013-vscode-workspace-extension.md) | Add a workspace-host VS Code interface over stdio | Accepted | Sidebar and bridge |
+| [0014](0014-editor-buffer-ownership.md) | Review edits and let the editor own buffers | Accepted | Editor ToolExecutor |
+| [0015](0015-cancellable-editor-workers.md) | Separate completions and coordinate cancellation | Accepted | Workers and runner |
+| [0016](0016-managed-runtime-and-vsix.md) | Ship a managed backend and allowlisted VSIX | Accepted | Setup and packaging |
 
-The last record accepts the decision to defer implementation. It does **not**
+
+Record 0012 accepts the decision to defer implementation. It does **not**
 accept a finished SQLite schema or imply that persistence or caching exists.
 
 ## Record lifecycle
