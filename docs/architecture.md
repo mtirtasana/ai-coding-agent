@@ -1,6 +1,6 @@
 # Architektur des generischen Coding-Agenten
 
-Diese Dokumentation beschreibt die implementierte Architektur der Version 0.2.
+Diese Dokumentation beschreibt die implementierte Architektur der Version 0.3.
 Sie richtet sich an Entwicklerinnen und Entwickler, die den Agenten verstehen,
 einen Modellanbieter ergänzen oder neue Werkzeuge anbinden möchten.
 
@@ -45,7 +45,7 @@ Der Kern beschreibt die Arbeit und die benötigten Fähigkeiten. Ports definiere
 Verträge für diese Fähigkeiten. Adapter erfüllen die Verträge mit konkreten
 Bibliotheken, APIs oder Dateisystemzugriffen.
 
-Beispiel: Der Kern fragt `ModelProvider.generate(messages, tools)` auf. Er kennt
+Beispiel: Der Kern ruft `ModelProvider.generate(messages, tools)` auf. Er kennt
 dabei eigene `Message`- und `ToolSpec`-Objekte. Der OpenAI-Adapter übersetzt diese
 in die Responses API; der Ollama-Adapter übersetzt sie in die Chat API. Der Kern
 bleibt bei einem Anbieterwechsel unverändert.
@@ -53,6 +53,8 @@ bleibt bei einem Anbieterwechsel unverändert.
 ```mermaid
 flowchart LR
     CLI["CLI: Einstieg und Verdrahtung"] --> Core["Agent-Kern"]
+    Core --> CB["Port: ContextBuilder"]
+    RB["RuleBasedContextBuilder"] -. "implementiert" .-> CB
     Core --> MP["Port: ModelProvider"]
     Core --> TP["Port: ToolExecutor"]
     Core --> EP["Port: EventSink"]
@@ -116,6 +118,7 @@ Hier werden konkrete Objekte ausgewählt, erzeugt und miteinander verbunden.
 | Datei | Verantwortung | Bewusst außerhalb ihrer Verantwortung |
 | --- | --- | --- |
 | `agent/core/engine.py` | Arbeitszyklus, Historie, Limits und Abschluss | HTTP, Modellformate, Dateizugriffe |
+| `agent/core/context.py` | Protokollvalidierung, Rundenauswahl und Zeichenbudget | Dateisuche und Zusammenfassung |
 | `agent/core/ports.py` | Verträge für Modell, Werkzeuge und Ereignisse | Konkrete Implementierungen |
 | `agent/core/types.py` | Gemeinsame anbieterunabhängige Datentypen | SDK-Typen und Persistenz |
 | `agent/adapters/models.py` | Übersetzung und Modellkommunikation | Werkzeugausführung |
@@ -160,6 +163,17 @@ classDiagram
     }
     Message "1" o-- "0..*" ToolCall
     RunResult "1" o-- "0..*" Message
+    class ModelResponse {
+        message: Message
+        usage: ModelUsage or None
+    }
+    class ModelUsage {
+        input_tokens: int or None
+        output_tokens: int or None
+        cached_input_tokens: int or None
+    }
+    ModelResponse --> Message
+    ModelResponse --> ModelUsage
 ```
 
 ### Nachrichten und Aufrufe
@@ -192,6 +206,22 @@ Das Modell kann diesen Fehler sehen und eine andere Aktion wählen. `RunResult`
 entsteht dagegen nur bei regulärem Abschluss und enthält den Abschlusstext,
 die Zahl der Modellaufrufe und die gesamte interne Nachrichtenhistorie.
 Die Historie wird nicht automatisch auf die Festplatte geschrieben.
+`RunResult.requests` enthält zusätzlich `RequestMetrics` mit Schrittzahl,
+`ContextStats` und optionalen Nutzungswerten pro Modellaufruf.
+
+`ModelResponse` ist die neue Anbieter-Rückgabehülle. Sie enthält die Assistant-
+Nachricht und optional `ModelUsage`. Unbekannte Tokenwerte sind `None` statt
+Schätzwerten. OpenAI liefert verfügbare Input-, Output- und gecachte Inputtokens;
+Ollama liefert `prompt_eval_count` und `eval_count`, jedoch keine Cachezählung.
+Gecachte Inputtokens sind eine Teilmenge der Inputtokens und werden nicht addiert.
+Die Offline-Demo hat keine tatsächlichen Nutzungswerte.
+
+**Migration von Version 0.2:** Eigene Modelladapter müssen ihre bisherige
+`Message`-Rückgabe in `ModelResponse(message)` einhüllen. Direkte Aufrufer lesen
+nun `response.message.content` statt `response.content`. Nutzungswerte sind optional;
+für die Kontextauswahl ist kein SDK oder Tokenizer erforderlich. Der bisherige
+Import von `ContextLimitError` aus `agent.core.engine` bleibt möglich, die Definition
+liegt jetzt in `agent.core.context`.
 
 `Message`, `ToolCall`, `ToolSpec` und `ToolResult` sind eingefrorene Dataclasses.
 Das verhindert das Neuzuweisen ihrer Felder; verschachtelte Dictionaries wie
@@ -201,7 +231,8 @@ Das verhindert das Neuzuweisen ihrer Felder; verschachtelte Dictionaries wie
 
 | Port | Methoden | Erwartung |
 | --- | --- | --- |
-| `ModelProvider` | `generate(messages, tools) -> Message` | Anbieterformate intern halten und eine Assistant-Nachricht liefern |
+| `ModelProvider` | `generate(messages, tools) -> ModelResponse` | Anbieterformate intern halten, Nachricht und optionale Nutzungswerte liefern |
+| `ContextBuilder` | `build(messages, tools, max_chars) -> ContextSelection` | Vollständige Quelle auf einen budgetierten Modellkontext projizieren |
 | `ToolExecutor` | `specifications()` und `execute(call)` | Angebotene Werkzeuge beschreiben und strukturierte Ergebnisse liefern |
 | `EventSink` | `emit(kind, data)` | Ereignisse empfangen; optional für den gesamten Lauf |
 
@@ -224,9 +255,9 @@ sequenceDiagram
     CLI->>Agent: run(task)
     Agent->>Tools: specifications()
     loop Bis Abschluss oder Limit
-        Agent->>Agent: Kontextumfang prüfen
+        Agent->>Agent: Kontext auswählen und Budget prüfen
         Agent->>Model: generate(messages, tools)
-        Model-->>Agent: Assistant-Nachricht
+        Model-->>Agent: ModelResponse mit Nachricht und optionalen Tokenwerten
         alt Werkzeugaufrufe vorhanden
             loop Jeden Aufruf nacheinander
                 Agent->>Tools: execute(call)
@@ -266,7 +297,7 @@ Textnachrichten erhalten Rolle und Inhalt, Aufrufe werden `function_call` und
 Ergebnisse werden `function_call_output`. Die Aufruf-ID bleibt erhalten.
 `ToolSpec` wird zu einer Funktionsdefinition mit `strict=True`.
 
-Der Request enthält die gesamte bisherige Historie und `store=False`. Die
+Der Request enthält die vom ContextBuilder ausgewählten Nachrichten und `store=False`. Die
 Implementierung setzt keinen serverseitigen Gesprächsfortsetzungsbezeichner ein.
 Die Antwort wird auf Ausgabetext und Funktionsaufrufe abgebildet.
 
@@ -289,7 +320,8 @@ beträgt standardmäßig 120 Sekunden und ist im Adapter-Konstruktor änderbar.
 Interne Funktionsargumente werden in JSON-Objekte übersetzt. Für Tool-Ergebnisse
 ordnet der Adapter die interne Aufruf-ID wieder dem Werkzeugnamen zu und trägt
 `tool_name` in die Ollama-Nachricht ein. IDs für zurückgelieferte Aufrufe werden
-lokal aus Historienlänge und Aufrufindex erzeugt.
+lokal aus einer UUID pro Antwort und dem Aufrufindex erzeugt. Eine gleichbleibende
+Länge des verkürzten Kontexts führt damit nicht zu wiederverwendeten IDs.
 
 Ein laufender Server und ein installiertes Modell mit Werkzeugunterstützung sind
 Voraussetzungen. Der Adapter installiert oder startet Ollama nicht. Eine explizite
@@ -382,9 +414,32 @@ Dateien sind nach dem Lauf über Git-Diffs und passende Tests zu prüfen.
 ## Kontext, Limits und Fehler
 
 Die Historie lebt ausschließlich in `Agent.run()`. Sie enthält Systemanweisungen,
-Aufgabe, Assistant-Antworten und Werkzeugergebnisse. Jeder Modellaufruf erhält
-den bisherigen Verlauf. Es gibt keine automatische Auswahl, Zusammenfassung,
-Vektordatenbank, Persistenz oder Wiederaufnahme eines abgebrochenen Laufs.
+Aufgabe, Assistant-Antworten und Werkzeugergebnisse. Der `ContextBuilder` erhält
+diese vollständige Historie und liefert eine separate Projektion für das Modell.
+Es gibt keine Zusammenfassung, Vektordatenbank, Persistenz oder Wiederaufnahme.
+
+Standard ist `RuleBasedContextBuilder(mode="recent")`. Er validiert vor der Auswahl
+das Protokoll: führende Systemnachrichten und genau eine ursprüngliche Nutzeraufgabe,
+danach Assistant-Runden mit sämtlichen zugehörigen Werkzeugergebnissen. Zusätzliche
+Nutzernachrichten während eines Laufs werden derzeit nicht unterstützt.
+
+Systemnachrichten und Aufgabe bleiben erhalten. Der Builder fügt die neuesten
+vollständigen Runden rückwärts hinzu und liefert sie in ursprünglicher Reihenfolge.
+Sobald eine ältere Runde nicht mehr passt, entfallen sie und alle davorliegenden
+Runden. Es entstehen keine Lücken durch das Überspringen einer großen mittleren
+Runde. Alte Informationen können dadurch fehlen; Projektregeln aus einer älteren
+`read_file`-Antwort werden nicht separat angeheftet.
+
+Die neueste Runde ist Pflicht. Überschreitet sie mit dem festen Kontext und den
+Werkzeugschemas das Budget, wird abgebrochen. Es werden keine einzelnen Nachrichten
+oder Resultate abgeschnitten. `mode="full"` behält den kompletten Verlauf und das
+bisherige Abbruchverhalten bei. Keine der beiden Varianten verändert die Quelle.
+
+`ContextSelection` enthält die ausgewählten Nachrichten und `ContextStats`:
+`full_chars`, `selected_chars`, `full_messages`, `selected_messages`, `dropped_rounds`.
+Die Zähler beziehen sich auf den Verlauf vor der aktuellen Modellantwort.
+Fehlende, doppelte oder verwaiste Werkzeugergebnisse sind Protokollfehler und
+werden auch dann abgewiesen, wenn die betreffende alte Runde entfernt würde.
 
 ```mermaid
 stateDiagram-v2
@@ -416,7 +471,8 @@ Kostenobergrenze und begrenzt nicht die Größe der nächsten Modellantwort.
 | Situation | Reaktion |
 | --- | --- |
 | Erwarteter Datei- oder Argumentfehler | `ToolResult(ok=False)` geht an das Modell |
-| Zeichenumfang vor nächstem Modellaufruf zu groß | `ContextLimitError` |
+| Pflichtkontext oder neueste Runde zu groß; im Modus `full` gesamte Historie zu groß | `ContextLimitError` |
+| Ungültige oder unvollständige Werkzeugrunden bei der Kontextauswahl | `ValueError` |
 | Kein Abschluss innerhalb der erlaubten Modellaufrufe | `StepLimitError` |
 | Andere Rolle als `assistant` oder doppelte IDs innerhalb einer Antwort | `ValueError` |
 | API-, Netzwerk- oder nicht behandelter Adapterfehler | Exception erreicht die CLI |
@@ -436,7 +492,8 @@ den Stream-Puffer sofort. Die CLI aktiviert ihn mit `--verbose` auf stderr.
 | Ereignis | Daten |
 | --- | --- |
 | `run_started` | `max_steps` |
-| `model_completed` | `step`, `tool_calls` |
+| `context_selected` | `step`, `full_chars`, `selected_chars`, `full_messages`, `selected_messages`, `dropped_rounds` |
+| `model_completed` | `step`, `tool_calls`, `usage` (optional verfügbare Tokenwerte) |
 | `tool_completed` | `name`, `ok` |
 | `run_completed` | `steps` |
 | `run_stopped` | `reason`: `context_limit` oder `step_limit` |
@@ -447,7 +504,8 @@ python -m agent.cli "Projekt untersuchen" --provider demo --verbose 2>events.jso
 
 Die aktuellen Ereignisse enthalten keine Aufgaben, Dateiinhalte oder
 Werkzeugargumente. Sie enthalten auch keine Zeitstempel, Lauf-IDs oder
-Token-/Kostenwerte. Ein Ereignisprotokoll ist somit eine Ausführungsübersicht,
+Kostenwerte. Tokenwerte erscheinen nur, sofern der Anbieter sie tatsächlich meldet.
+Ein Ereignisprotokoll ist somit eine Ausführungsübersicht,
 kein vollständiges Audit oder wiederabspielbares Gespräch. Fehler beim Schreiben
 des Sinks werden nicht abgefangen und können den Lauf beenden.
 
@@ -466,6 +524,7 @@ aus. Damit bleiben Konfigurationsdetails außerhalb des Kerns.
 | `--base-url` | `http://localhost:11434`, nur für Ollama |
 | `--max-steps` | 15 Modellaufrufe, muss positiv sein |
 | `--max-context-chars` | 200.000 ungefähre Zeichen, muss positiv sein |
+| `--context-mode` | `recent` als Standard, `full` für vollständige Historie und Vergleich |
 | `--allow-write` | Standardmäßig aus |
 | `--verbose` | Standardmäßig aus; JSONL-Metadaten auf stderr |
 
@@ -482,7 +541,8 @@ Die Demo benötigt keine Schlüssel und ignoriert die fachliche Aufgabe.
 2. `generate(messages, tools)` implementieren und interne Typen in das
    Anbieterformat übersetzen.
 3. Textantworten und Werkzeugaufrufe einschließlich ihrer Zuordnung wieder als
-   `Message(role="assistant", ...)` zurückgeben.
+   `ModelResponse(Message(role="assistant", ...), usage=...)` zurückgeben.
+   Fehlende Nutzungsdaten nicht erfinden; das SDK bleibt im Adapter.
 4. Den Adapter in der CLI beziehungsweise einem späteren Konfigurationsmodul
    auswählbar machen und Bibliotheken bei Bedarf optional deklarieren.
 5. Die Übersetzung und mehrere aufeinanderfolgende Werkzeugrunden testen.
@@ -490,11 +550,11 @@ Die Demo benötigt keine Schlüssel und ignoriert die fachliche Aufgabe.
 Minimaler Testadapter ohne externe API:
 
 ```python
-from agent.core.types import Message
+from agent.core.types import Message, ModelResponse
 
 class StaticProvider:
     def generate(self, messages, tools):
-        return Message("assistant", "Keine Änderungen erforderlich.")
+        return ModelResponse(Message("assistant", "Keine Änderungen erforderlich."))
 ```
 
 Ein zukünftiger Anthropic-Adapter folgt demselben Vertrag; er ist derzeit noch
@@ -544,7 +604,12 @@ Werkzeugvalidierung, Fehlerrückgabe an das Modell, Schritt- und Kontextlimits,
 getrennte Historien, Registry-Routing sowie die OpenAI- und Ollama-Übersetzungen
 mit simulierten Antworten. Die Tests benötigen kein SDK und keinen API-Schlüssel.
 
-Der dokumentierte Implementierungsstand besteht aus 16 erfolgreichen lokalen
+`tests/test_context.py` prüft Auswahlreihenfolge, feste Inhalte, Budgetgrenzen,
+mehrere Werkzeuge pro Runde, ungültige Protokolle und einen längeren Vergleichslauf.
+`tests/test_usage.py` prüft echte, fehlende und teilweise Nutzungswerte sowie
+Ollama-Aufruf-IDs bei gleichbleibender Kontextlänge.
+
+Der dokumentierte Implementierungsstand besteht aus 31 erfolgreichen lokalen
 Tests und einem ausgeführten Offline-CLI-Durchlauf. Das belegt die getesteten
 Verträge und Pfade, keine erfolgreiche Kommunikation mit echten Modellservern.
 Live-Tests, Kompatibilitätsprüfungen mehrerer Modelle und eine Überprüfung der
@@ -558,7 +623,8 @@ inhaltlichen Coding-Ergebnisse bleiben separate Aufgaben.
 | Eigene Datentypen | Anbieterwechsel ohne SDK-Typen im Kern | Adapter müssen Formate und Besonderheiten abbilden |
 | Protocol statt Pflicht-Basisklasse | Leichte Testdoubles und geringe Kopplung | Keine automatische Laufzeitprüfung der Verträge |
 | OpenAI als optionale Abhängigkeit | Lokaler Betrieb ohne Cloud-SDK | OpenAI muss separat installiert werden |
-| Expliziter Abbruch am Kontextlimit | Keine still verlorenen Anweisungen oder Tool-Ergebnisse | Große Aufgaben müssen aufgeteilt werden |
+| Regelbasierte Kontextauswahl | Weniger wiederholte Inhalte bei unveränderter Historie | Ältere Informationen können dem Modell fehlen |
+| Expliziter Abbruch bei zu großem Pflichtkontext | Keine unvollständigen Werkzeugrunden | Große Einzelrunden benötigen weiterhin kleinere Aufgaben |
 | Vollständige Dateien statt Patches | Kleiner erster Werkzeugsatz | Unbeabsichtigte Überschreibungen sind möglich |
 | Metadaten statt vollständiger Gesprächslogs | Kleine, einfache Ereignisausgabe | Keine automatische Wiederaufnahme oder vollständige Rekonstruktion |
 
@@ -574,5 +640,6 @@ Bestandteil des Grundgerüsts und sollte erst bei konkretem Bedarf hinzukommen.
 ## Weiterführender Architekturvorschlag
 
 Der [Vorschlag für Kontextverwaltung und SQLite-Persistenz](context-and-persistence.md)
-beschreibt einen möglichen nächsten Ausbau mit Speicher-Ports, Kontextbudget,
-Datenmodell und Cache-Invalidierung. Diese Erweiterungen sind noch nicht implementiert.
+beschreibt den weiteren Ausbau mit Speicher-Ports, Datenmodell und Cache-Invalidierung.
+Regelbasierte Kontextauswahl und Nutzungsmessung sind bereits implementiert;
+SQLite, Zusammenfassungen und Artefaktauswahl bleiben Vorschläge.

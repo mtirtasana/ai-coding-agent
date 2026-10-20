@@ -1,15 +1,18 @@
 # Vorschlag: Kontextverwaltung und SQLite-Persistenz
 
-**Status: Architekturvorschlag, noch nicht implementiert.** Diese Empfehlung baut
-auf [der Architektur der Version 0.2](architecture.md) auf. Sie ändert keinen
-Anwendungscode und setzt keine Migration oder Datenbank voraus.
+**Status: teilweise umgesetzt, Stand Version 0.3.** Die regelbasierte Kontextauswahl
+(`recent`/`full`), Auswahlstatistiken und optionale Anbieter-Tokenwerte sind implementiert.
+SQLite, Speicher-Ports, Cache, Zusammenfassungen, TokenEstimator und relevante
+Dateiausschnitte sind weiterhin Vorschläge. Die folgende Gesamtarchitektur trennt
+bewusst die aktuelle Basis vom geplanten Ausbau; das SQL ist keine Migration.
+Details zum aktuellen Verhalten stehen in der [Architekturdokumentation](architecture.md).
 
 ## Entscheidung
 
 SQLite ist für diesen Agenten als lokaler Sitzungs- und Artefaktspeicher sinnvoll.
 Tokenverbrauch reduziert jedoch erst eine gezielte Kontextauswahl. Der nächste
-Ausbauschritt sollte deshalb einen ContextBuilder mit explizitem Budget einführen,
-danach SQLite hinter austauschbaren Speicher-Ports anbinden.
+Schritt nach dem vorhandenen regelbasierten ContextBuilder sollte deshalb
+die Messergebnisse auswerten und SQLite hinter austauschbaren Speicher-Ports anbinden.
 
 Empfohlene Reihenfolge:
 
@@ -27,9 +30,10 @@ aktuellen Umfang nicht erforderlich.
 ## Ausgangslage im Repository
 
 `Agent.run()` führt die gesamte Nachrichtenhistorie im Arbeitsspeicher. Jeder
-Modellaufruf erhält alle vorherigen Nachrichten. Werkzeugausgaben werden vollständig
-als JSON-Text angehängt. `max_context_chars` stoppt beim ungefähren Zeichenlimit;
-Auswahl und Komprimierung finden nicht statt.
+Modellaufruf erhält in Version 0.3 eine budgetierte Auswahl der neuesten vollständigen
+Runden oder im Modus `full` alle Nachrichten. Werkzeugausgaben werden vollständig
+als JSON-Text in der Originalhistorie behalten. `max_context_chars` ist weiterhin
+ein ungefähres Zeichenbudget. Auswahl findet statt, Komprimierung noch nicht.
 
 `JsonlEventSink` protokolliert nur Metadaten. Er ist weder Gesprächsspeicher noch
 Checkpoint. `RunResult.messages` existiert nur bei erfolgreichem Abschluss.
@@ -71,9 +75,10 @@ flowchart TD
     Context --> Model["ModelProvider"]
 ```
 
-Die Komponenten sind ein vorgeschlagener Ausbau, keine bereits vorhandenen APIs.
-Der bestehende `ModelProvider` kann zunächst seine Signatur behalten und bekommt
-statt der vollständigen Historie einen aufgebauten Kontext. Die vollständige
+Das Diagramm zeigt den vollständigen Zielausbau. `ContextBuilder` ist als Port mit
+regelbasierter Implementierung vorhanden; Speicher-Ports und TokenEstimator fehlen noch.
+`ModelProvider.generate()` erhält bereits einen ausgewählten Kontext und liefert
+seit Version 0.3 `ModelResponse` mit Nachricht und optionalen Anbieter-Tokenwerten. Die vollständige
 Historie bleibt im SessionStore erhalten. Kontextprojektion und Quelle werden
 also getrennt.
 
@@ -406,7 +411,6 @@ Vor einer Implementierungsfreigabe sind folgende Tests vorzusehen:
 - Zusammenfassung mit abweichenden Quell-Hashes wird nicht ungeprüft verwendet.
 - Sitzungsdatenbank ist über Workspace-Werkzeuge nicht zugänglich.
 
-Als nächstes ist ein kleiner ContextBuilder mit In-Memory-Speicher und
-messbarer Kontextauswahl sinnvoll. SQLite-Persistenz folgt als austauschbarer
-Adapter. Diese Reihenfolge adressiert zuerst den Tokenverbrauch und verhindert,
+Der erste Schritt ist mit einem regelbasierten ContextBuilder und einer Historie
+im Arbeitsspeicher umgesetzt. SQLite-Persistenz folgt als austauschbarer Adapter. Diese Reihenfolge adressiert zuerst den Tokenverbrauch und verhindert,
 dass ein Speicherlayer ohne messbaren Nutzen zum Zentrum der Architektur wird.

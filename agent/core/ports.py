@@ -1,10 +1,15 @@
 from typing import Protocol, Sequence
 
-from .types import Message, ToolCall, ToolResult, ToolSpec
+from .types import ContextSelection, Message, ModelResponse, ToolCall, ToolResult, ToolSpec
 
 
 class ModelProvider(Protocol):
-    def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> Message: ...
+    def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse: ...
+
+
+class ContextBuilder(Protocol):
+    def build(self, messages: Sequence[Message], tools: Sequence[ToolSpec],
+              max_chars: int) -> ContextSelection: ...
 
 
 class ToolExecutor(Protocol):

@@ -25,6 +25,42 @@ class Message:
 
 
 @dataclass(frozen=True)
+class ModelUsage:
+    """Provider-reported counts; unknown fields stay None, never estimated."""
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class ModelResponse:
+    message: Message
+    usage: ModelUsage | None = None
+
+
+@dataclass(frozen=True)
+class ContextStats:
+    full_chars: int
+    selected_chars: int
+    full_messages: int
+    selected_messages: int
+    dropped_rounds: int
+
+
+@dataclass(frozen=True)
+class ContextSelection:
+    messages: tuple[Message, ...]
+    stats: ContextStats
+
+
+@dataclass(frozen=True)
+class RequestMetrics:
+    step: int
+    context: ContextStats
+    usage: ModelUsage | None
+
+
+@dataclass(frozen=True)
 class ToolResult:
     ok: bool
     content: str
@@ -35,3 +71,4 @@ class RunResult:
     text: str
     steps: int
     messages: list[Message] = field(default_factory=list)
+    requests: list[RequestMetrics] = field(default_factory=list)

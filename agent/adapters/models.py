@@ -1,6 +1,12 @@
 from collections.abc import Sequence
+from uuid import uuid4
 
-from agent.core.types import Message, ToolCall, ToolSpec
+from agent.core.types import Message, ModelResponse, ModelUsage, ToolCall, ToolSpec
+
+
+def token_count(value):
+    """Keep unavailable/malformed usage unknown; zero is a real reported count."""
+    return value if type(value) is int and value >= 0 else None
 
 
 class OpenAIProvider:
@@ -11,7 +17,7 @@ class OpenAIProvider:
             client = OpenAI()
         self.client, self.model = client, model
 
-    def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> Message:
+    def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse:
         items = []
         for message in messages:
             if message.role == "tool":
@@ -29,7 +35,15 @@ class OpenAIProvider:
                     "parameters": t.parameters, "strict": True} for t in tools])
         calls = tuple(ToolCall(c.call_id, c.name, c.arguments)
                       for c in response.output if c.type == "function_call")
-        return Message("assistant", response.output_text, calls)
+        raw_usage = getattr(response, "usage", None)
+        usage = None
+        if raw_usage is not None:
+            details = getattr(raw_usage, "input_tokens_details", None)
+            usage = ModelUsage(
+                input_tokens=token_count(getattr(raw_usage, "input_tokens", None)),
+                output_tokens=token_count(getattr(raw_usage, "output_tokens", None)),
+                cached_input_tokens=token_count(getattr(details, "cached_tokens", None)))
+        return ModelResponse(Message("assistant", response.output_text, calls), usage)
 
 
 class OllamaProvider:
@@ -38,7 +52,7 @@ class OllamaProvider:
                  timeout: float = 120):
         self.model, self.base_url, self.timeout = model, base_url.rstrip("/"), timeout
 
-    def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> Message:
+    def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse:
         import json
         from urllib.request import Request, urlopen
         items = []
@@ -59,17 +73,25 @@ class OllamaProvider:
         request = Request(self.base_url + "/api/chat", data=json.dumps(payload).encode(),
                           headers={"Content-Type": "application/json"})
         with urlopen(request, timeout=self.timeout) as response:
-            result = json.load(response)["message"]
-        calls = tuple(ToolCall(f"ollama-{len(messages)}-{i}", c["function"]["name"],
+            payload = json.load(response)
+        result = payload["message"]
+        # Selected history can have the same length in successive requests.
+        response_id = uuid4().hex
+        calls = tuple(ToolCall(f"ollama-{response_id}-{i}", c["function"]["name"],
                               json.dumps(c["function"]["arguments"]))
                       for i, c in enumerate(result.get("tool_calls") or []))
-        return Message("assistant", result.get("content") or "", calls)
+        input_tokens = token_count(payload.get("prompt_eval_count"))
+        output_tokens = token_count(payload.get("eval_count"))
+        usage = (None if input_tokens is None and output_tokens is None else
+                 ModelUsage(input_tokens=input_tokens, output_tokens=output_tokens))
+        return ModelResponse(Message("assistant", result.get("content") or "", calls), usage)
 
 
 class DemoProvider:
     """Deterministischer Offline-Durchlauf, kein Sprachmodell."""
     def generate(self, messages, tools):
         if messages[-1].role == "user":
-            return Message("assistant", tool_calls=(ToolCall("demo-1", "list_files",
-                                                           '{"path":"."}'),))
-        return Message("assistant", "Offline-Demo abgeschlossen: " + messages[-1].content)
+            call = ToolCall("demo-1", "list_files", '{"path":"."}')
+            return ModelResponse(Message("assistant", tool_calls=(call,)))
+        message = Message("assistant", "Offline-Demo abgeschlossen: " + messages[-1].content)
+        return ModelResponse(message)

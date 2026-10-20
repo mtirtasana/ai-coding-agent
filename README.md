@@ -48,11 +48,13 @@ Die [ausführliche Architekturdokumentation](docs/architecture.md) erläutert di
 Komponenten, Design Patterns, Datenflüsse und Erweiterungspunkte mit Diagrammen.
 
 Ein separater [Architekturvorschlag für Kontextverwaltung und SQLite](docs/context-and-persistence.md)
-beschreibt Datenmodell, Cache-Invalidierung und Tokenbudgetierung. Er ist noch nicht implementiert.
+beschreibt Datenmodell, Cache-Invalidierung und weitere Ausbaustufen. Regelbasierte
+Kontextauswahl und Messung sind implementiert; SQLite, Cache und Zusammenfassungen noch nicht.
 
 ```mermaid
 flowchart TD
     CLI[CLI: Composition Root] --> Agent[Agent-Kern]
+    Agent --> Context[ContextBuilder]
     Agent --> Model[ModelProvider-Port]
     Model --> OpenAI[OpenAI-Adapter]
     Model --> Ollama[Ollama-Adapter]
@@ -66,7 +68,8 @@ flowchart TD
 
 - `agent/core/types.py`: eigene Nachrichten, Aufrufe, Ergebnisse und Werkzeugschemas.
 - `agent/core/ports.py`: Python-Protokolle für Modelle, Werkzeuge und Ereignisse.
-- `agent/core/engine.py`: Beobachten → Modellentscheidung → Werkzeug → Ergebnis.
+- `agent/core/engine.py`: Beobachten → Kontextauswahl → Modellentscheidung → Werkzeug → Ergebnis.
+- `agent/core/context.py`: vollständige Runden auswählen und Zeichenbudget prüfen.
 - `agent/adapters/models.py`: Übersetzung zwischen internen Typen und Anbieterformaten.
 - `agent/adapters/tools.py`: Werkzeugregistrierung, String-Argumentvalidierung und Fehlerergebnisse.
 - `agent/files.py`: lokaler Workspace mit bestehenden Pfadbeschränkungen.
@@ -75,7 +78,8 @@ flowchart TD
 
 Abhängigkeiten zeigen zum Kern. Der Kern kennt weder SDKs noch CLI, HTTP oder
 Dateisystem. Für einen neuen Anbieter `ModelProvider.generate(messages, tools)`
-implementieren und in der CLI auswählen lassen. Ein Provider muss interne
+implementieren und in der CLI auswählen lassen. Rückgabe ist `ModelResponse`
+mit einer `Message` und optionalen tatsächlichen `ModelUsage`-Tokenwerten. Ein Provider muss interne
 Assistant-Nachrichten liefern und seine anbieterspezifischen Tool-Formate selbst
 übersetzen. Zusätzliche Werkzeuge werden mit `ToolSpec` und Handler registriert;
 bei anderen Argumenttypen als Strings muss die Validierung erweitert werden.
@@ -85,14 +89,33 @@ bei anderen Argumenttypen als Strings muss die Validierung erweitert werden.
 Standardmäßig sind nur `list_files` und `read_file` verfügbar. `--allow-write`
 schaltet `write_file` hinzu; dabei können Dateien vollständig ersetzt werden.
 Patch-Anwendung, Testprozesse, Git-Werkzeuge, Container-Isolation, Anthropic-Adapter
-und automatische Kontextauswahl sind noch nicht implementiert.
+und automatische Auswahl relevanter Dateiabschnitte sind noch nicht implementiert.
 
 `--max-steps 15` begrenzt Modellaufrufe. `--max-context-chars 200000` begrenzt den
 ungefähren Zeichenumfang vor dem nächsten Aufruf, keine Tokens oder Kosten.
-Bei Überschreitung wird abgebrochen; Historie wird nicht stillschweigend gekürzt.
+Standard ist `--context-mode recent`: Systemanweisungen und Nutzeraufgabe bleiben
+immer erhalten, danach werden die neuesten vollständigen Assistant-/Werkzeugrunden
+bis zum Budget ausgewählt. Ältere Runden entfallen zuerst aus dem Modellkontext.
+Die vollständige Historie bleibt unverändert erhalten. Informationen aus älteren
+Runden können dem Modell deshalb fehlen; es gibt keine automatische Zusammenfassung.
+Passt bereits der Pflichtkontext oder die neueste Runde nicht hinein, wird abgebrochen.
+`--context-mode full` überträgt wie bisher die gesamte Historie oder bricht am Limit ab.
+Einzelne Nachrichten werden nie abgeschnitten.
 Bereits geschriebene Änderungen bleiben bei Abbruch oder API-Fehler bestehen.
 Jeder neue Lauf beginnt mit eigenem Kontext. `--verbose` schreibt Ereignisse
 auf stderr; diese können mit `2>events.jsonl` gespeichert werden.
+`context_selected` zeigt ursprünglichen/ausgewählten Zeichenumfang, Nachrichtenzahl
+und entfernte Runden. `model_completed.usage` enthält verfügbare tatsächliche
+Tokenwerte; fehlende Werte sind `null`, keine Schätzung und keine Nullmessung.
+Zeichenwerte sind keine Tokens und schließen nicht die gesamte Anbieterformatierung ein.
+
+```bash
+coding-agent "Projekt untersuchen" --provider demo --context-mode recent --verbose
+coding-agent "Projekt untersuchen" --provider demo --context-mode full --verbose
+```
+
+Bei direkter Python-Nutzung enthält `RunResult.requests` die Auswahlstatistiken
+und optionalen Nutzungswerte pro Modellaufruf. `RunResult.messages` bleibt vollständig.
 
 Aufgelöste Pfade müssen im Workspace liegen. `.git`, `.ssh`, `.aws` und Namen
 beginnend mit `.env` sind gesperrt. Das ist keine Betriebssystem-Sandbox und schützt

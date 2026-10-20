@@ -6,6 +6,7 @@ from pathlib import Path
 from agent.adapters.events import JsonlEventSink
 from agent.adapters.models import DemoProvider, OllamaProvider, OpenAIProvider
 from agent.adapters.tools import workspace_tools
+from agent.core.context import RuleBasedContextBuilder
 from agent.core.engine import Agent
 from agent.files import Workspace
 
@@ -21,6 +22,8 @@ def main():
                         help="Ollama-Serveradresse")
     parser.add_argument("--max-steps", type=int, default=15)
     parser.add_argument("--max-context-chars", type=int, default=200_000)
+    parser.add_argument("--context-mode", choices=["recent", "full"], default="recent",
+                        help="recent: neueste vollständige Runden; full: gesamte Historie")
     parser.add_argument("--allow-write", action="store_true")
     parser.add_argument("--verbose", action="store_true", help="JSONL-Ereignisse auf stderr")
     args = parser.parse_args()
@@ -40,7 +43,8 @@ def main():
         workspace = Workspace(args.workspace, args.allow_write)
         agent = Agent(model, workspace_tools(workspace),
                       JsonlEventSink(sys.stderr) if args.verbose else None,
-                      max_steps=args.max_steps, max_context_chars=args.max_context_chars)
+                      max_steps=args.max_steps, max_context_chars=args.max_context_chars,
+                      context_builder=RuleBasedContextBuilder(args.context_mode))
         print(agent.run(args.task).text)
     except Exception as exc:
         parser.exit(1, f"Fehler: {exc}\n")
