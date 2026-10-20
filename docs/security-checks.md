@@ -10,7 +10,7 @@ OWASP Top 10 is a risk framework, not a scanner or certification provided here.
 Use a dedicated virtual environment for each project, then install the checks:
 
 ```bash
-python -m pip install --upgrade pip
+python -m pip install --upgrade pip setuptools
 python -m pip install -e '.[openai,terminal,dev,security]'
 python -m bandit -r agent
 python -m pip_audit --skip-editable
@@ -93,7 +93,7 @@ the audit job without preventing the other jobs from reporting their outcomes.
 Bandit scans `agent/` at all default severity levels; tests containing intentional
 attack examples are outside its target. CI audits a fresh environment with the
 OpenAI, terminal, development and security extras installed, including transitive
-and tooling packages. pip itself is updated before this audit. The editable local
+and tooling packages. pip and setuptools are updated before this audit. The editable local
 project is skipped because it is not a published distribution; its installed
 dependencies are still audited. No vulnerability identifiers are ignored.
 
