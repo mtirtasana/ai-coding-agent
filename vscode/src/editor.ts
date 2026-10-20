@@ -154,9 +154,8 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
       const file = await this.guarded(name);
       if (file !== expectedFile)
         throw Error("Resolved path changed during review.");
+      let appliedText = after;
       if (document) {
-        if (file !== expectedFile)
-          throw Error("Resolved file changed; obtain a new snapshot.");
         if (
           document.isClosed ||
           document.version !== p.version ||
@@ -185,6 +184,7 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
           { undoStopBefore: true, undoStopAfter: true },
         );
         if (!applied) throw Error("Editor rejected stale edit.");
+        appliedText = document.getText();
       } else {
         try {
           await fs.lstat(file);
@@ -199,12 +199,17 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
         edit.insert(uri, new vscode.Position(0, 0), after);
         if (!(await vscode.workspace.applyEdit(edit)))
           throw Error("Could not create file.");
-        await vscode.window.showTextDocument(uri, {
+        const created = await vscode.window.showTextDocument(uri, {
           preview: false,
           preserveFocus: true,
         });
+        appliedText = created.document.getText();
       }
-      return JSON.stringify({ applied: true, path: name, sha256: sha(after) });
+      return JSON.stringify({
+        applied: true,
+        path: name,
+        sha256: sha(appliedText),
+      });
     } finally {
       this.proposals.delete(id);
       this.documents.delete(`generic-agent:${id}/before`);

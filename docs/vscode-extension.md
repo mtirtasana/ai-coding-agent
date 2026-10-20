@@ -89,7 +89,8 @@ changes; snapshots hash that text and include document version metadata.
 Every `write_file` or `apply_edit` opens a native before/after diff and creates an
 approval request in the sidebar. Reject/cancel returns a tool failure. Accept
 revalidates the canonical target, document version and snapshot text before using
-VS Code edits. Existing files stay unsaved; native Undo is available. New files
+VS Code edits. Applied-edit hashes describe the actual buffer after native
+line-ending normalization. Existing files stay unsaved; native Undo is available. New files
 are created through a WorkspaceEdit after review. Preview text is bounded, and
 there is no general patch executor.
 
@@ -171,7 +172,8 @@ callbacks, permission denial, sanitized errors, cancellation and output settings
 Node tests cover guarded editing, dirty buffers, review rejection/staleness,
 command save/permission gates, bounded completion context and webview HTML
 injection. Native Extension Host tests install the VSIX and exercise activation,
-editor snapshots, reviewed application, Undo and existing diagnostics. CI runs
+editor snapshots, reviewed application, normalized-line-ending hashes, Undo and
+existing diagnostics. CI runs
 current stable VS Code on Linux/Windows/macOS and the 1.95 release family on Linux.
 Live model quality is not established by demo tests.
 

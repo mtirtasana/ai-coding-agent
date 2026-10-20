@@ -102,6 +102,45 @@ exports.run = async () => {
     ).ok,
     false,
   );
+  const crlfFile = path.join(folder.uri.fsPath, "crlf.py");
+  await fs.writeFile(crlfFile, "value = 1\r\n");
+  const crlfDoc = await vscode.workspace.openTextDocument(
+    vscode.Uri.file(crlfFile),
+  );
+  const crlfSnapshot = JSON.parse(
+    (
+      await tools.execute(
+        "file_snapshot",
+        { path: "crlf.py" },
+        "plan",
+        () => true,
+      )
+    ).content,
+  );
+  const normalized = tools.execute(
+    "apply_edit",
+    {
+      path: "crlf.py",
+      expected_sha256: crlfSnapshot.sha256,
+      old_text: "value = 1",
+      new_text: "value = 2\nextra = 3",
+    },
+    "implement",
+    () => true,
+  );
+  for (let i = 0; i < 200 && !tools.proposals.size; i++)
+    await new Promise((r) => setTimeout(r, 10));
+  assert.equal(tools.proposals.size, 1);
+  await tools.decide([...tools.proposals.keys()][0], true);
+  const normalizedResult = await normalized;
+  assert.equal(normalizedResult.ok, true, normalizedResult.content);
+  assert.equal(
+    JSON.parse(normalizedResult.content).sha256,
+    hash(crlfDoc.getText()),
+    "Edit result must hash the actual buffer after native EOL normalization",
+  );
+  await vscode.window.showTextDocument(crlfDoc);
+  await vscode.commands.executeCommand("workbench.action.files.revert");
   console.log(
     "Native VS Code tests passed: activation, dirty snapshots, planning denial, reviewed apply, unsaved buffers, Undo, rejection, diagnostics and path guards.",
   );
