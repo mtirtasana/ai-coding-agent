@@ -69,8 +69,10 @@ when the task warrants it. CI runs checks independently of model decisions.
 
 Each result contains `check` (`security` or `dependency_audit`), `passed`,
 `exit_code`, combined stdout/stderr, elapsed time, `timed_out`,
-`output_truncated`, and `capture_complete`. Only exit zero without timeout sets
-`passed=True`. Registry-level startup failures, including a missing executable,
+`output_truncated`, `capture_complete`, and `capture_error` (null on successful
+capture). A pass requires exit zero, no timeout, and successful output capture.
+A reader failure stops a running command and returns `passed=False` even if
+the process has already exited zero; partial output remains available. Registry-level startup failures, including a missing executable,
 return `ToolResult(ok=False)` with the error, rather than a successful scan.
 A nonzero exit can mean findings, configuration problems, or network failure;
 inspect output before interpreting it. This adapter does not normalize

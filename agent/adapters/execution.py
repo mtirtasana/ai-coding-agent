@@ -55,9 +55,10 @@ class LocalCommandRunner:
         captured = bytearray()
         done = threading.Event()
         truncated = False
+        capture_error = None
 
         def drain():
-            nonlocal truncated
+            nonlocal truncated, capture_error
             try:
                 while True:
                     chunk = process.stdout.read(8192)
@@ -67,6 +68,8 @@ class LocalCommandRunner:
                     captured.extend(chunk[:remaining])
                     if len(chunk) > remaining:
                         truncated = True
+            except Exception as exc:
+                capture_error = f'{type(exc).__name__}: {exc}'
             finally:
                 done.set()
 
@@ -75,6 +78,9 @@ class LocalCommandRunner:
         try:
             reader.start()
             while process.poll() is None or not done.is_set():
+                if capture_error is not None:
+                    self._stop(process)
+                    break
                 remaining = self.timeout - (time.monotonic() - started)
                 if remaining <= 0:
                     timed_out = True
@@ -97,10 +103,12 @@ class LocalCommandRunner:
                 reader.join(timeout=2)
             if done.is_set() or reader.ident is None:
                 process.stdout.close()
-        return {'check': self.check, 'passed': process.returncode == 0 and not timed_out,
+        capture_complete = done.is_set() and capture_error is None
+        return {'check': self.check, 'passed': process.returncode == 0 and not timed_out and capture_complete,
                 'exit_code': process.returncode, 'output': bytes(captured).decode('utf-8', errors='replace'),
                 'elapsed_seconds': round(time.monotonic() - started, 6), 'timed_out': timed_out,
-                'output_truncated': truncated, 'capture_complete': done.is_set()}
+                'output_truncated': truncated, 'capture_complete': capture_complete,
+                'capture_error': capture_error}
 
     def as_tool(self):
         result = self.run()

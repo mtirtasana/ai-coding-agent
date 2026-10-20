@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import subprocess
@@ -6,6 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from agent.adapters.execution import LocalTestRunner
@@ -39,6 +41,36 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(len(result['output']), 1024)
         self.assertTrue(result['output_truncated'])
         self.assertTrue(result['capture_complete'])
+
+    def test_output_read_error_cannot_report_a_successful_check(self):
+        class BrokenOutput(io.BytesIO):
+            def read(self, size):
+                raise OSError('capture unavailable')
+        process = SimpleNamespace(stdout=BrokenOutput(), returncode=0,
+                                  poll=lambda: 0, wait=lambda timeout: 0)
+        with patch('agent.adapters.execution.subprocess.Popen', return_value=process), \
+                patch.object(LocalTestRunner, '_stop'):
+            result = self.runner('pass').run()
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['capture_complete'])
+        self.assertIn('capture unavailable', result['capture_error'])
+        self.assertEqual(result['exit_code'], 0)
+        self.assertTrue(process.stdout.closed)
+
+    def test_capture_error_stops_a_running_command_without_waiting_for_timeout(self):
+        class BrokenOutput(io.BytesIO):
+            def read(self, size):
+                raise OSError('reader failed')
+        process = SimpleNamespace(stdout=BrokenOutput(), returncode=-9,
+                                  poll=lambda: None, wait=lambda timeout: -9)
+        with patch('agent.adapters.execution.subprocess.Popen', return_value=process), \
+                patch.object(LocalTestRunner, '_stop') as stop:
+            result = self.runner('pass', timeout=0.2).run()
+        stop.assert_called_once_with(process)
+        self.assertFalse(result['timed_out'])
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['capture_complete'])
+        self.assertIn('reader failed', result['capture_error'])
 
     def test_timeout(self):
         result = self.runner('import time; time.sleep(20)', timeout=0.15).run()

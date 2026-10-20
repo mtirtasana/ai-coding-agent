@@ -96,7 +96,8 @@ The registry also rejects any attempt to pass model-supplied command arguments.
   "elapsed_seconds": 0.05,
   "timed_out": false,
   "output_truncated": false,
-  "capture_complete": true
+  "capture_complete": true,
+  "capture_error": null
 }
 ```
 
@@ -162,3 +163,8 @@ Separate `run_security` and `run_dependency_audit` tools reuse the bounded comma
 runner and require explicit commands plus `--allow-exec`. Planning blocks both.
 The prompt adds effective `security:on/off` and `audit:on/off` indicators.
 See [Security checks](security-checks.md) for setup, CI, results and limitations.
+
+
+Output reader failures are reported in `capture_error`, set `capture_complete`
+and `passed` to false, and stop a still-running command without waiting for its
+deadline. Exit zero alone does not establish a successful verification.

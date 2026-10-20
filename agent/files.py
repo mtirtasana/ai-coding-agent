@@ -39,6 +39,8 @@ class Workspace:
             content = args["content"]
             if not isinstance(content, str) or len(content) > 100_000:
                 raise ValueError("Ungültiger oder zu großer Dateiinhalt.")
+            # Reject unpaired Unicode surrogates before mkdir or opening/truncating a file.
+            content.encode("utf-8")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             return f"Geschrieben: {path.relative_to(self.root)}"

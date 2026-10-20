@@ -643,7 +643,7 @@ Die zusätzlichen Tests prüfen kompatible Chat-Übersetzungen, Suche, gezielte 
 Prozessgrenzen und den deterministischen vollständigen Reparaturzyklus. Die Evaluation
 prüft unabhängig vom Abschlusstext des Modells.
 
-Der dokumentierte Implementierungsstand besteht aus 100 erfolgreichen lokalen
+Der dokumentierte Implementierungsstand besteht aus 104 erfolgreichen lokalen
 Tests und einem ausgeführten Offline-CLI-Durchlauf. Das belegt die getesteten
 Verträge und Pfade, keine erfolgreiche Kommunikation mit echten Modellservern.
 Live-Tests, Kompatibilitätsprüfungen mehrerer Modelle und eine Überprüfung der
@@ -724,3 +724,14 @@ CLI-Verträge, CI-Aufteilung, Audit-Abdeckung und die einzeln begründeten
 Bandit-Ausnahmen. Der Ollama-Adapter erlaubt nur HTTP(S)-Endpunkte ohne eingebettete
 Zugangsdaten, Query oder Fragment und lehnt Weiterleitungen ab. Bandit und
 pip-audit sind optionale Werkzeuge, keine Abhängigkeiten des Agent-Kerns.
+
+
+### Korrekturen nach dem Bug-Review
+
+`write_file` validiert UTF-8 vor dem Anlegen von Verzeichnissen oder dem Öffnen
+der Zieldatei. Ungültige Unicode-Surrogate können daher keine vorhandene Datei
+mehr leeren. Der Prozessadapter erfasst Fehler des Ausgabe-Threads in
+`capture_error`; erfolgreiche Prüfungen erfordern neben Exitcode null auch eine
+fehlerfreie Ausgabeerfassung. Laufende Prozesse werden bei Leserfehlern beendet.
+Bei abgelehnten Ollama-Weiterleitungen schließt der Adapter die HTTP-Antwort,
+bevor er den Fehler zurückgibt.

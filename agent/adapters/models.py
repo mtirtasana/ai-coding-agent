@@ -63,6 +63,8 @@ class OllamaProvider:
 
         class NoRedirect(HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
+                if fp is not None:
+                    fp.close()
                 raise ValueError("Ollama endpoint redirects are not supported.")
 
         items = []

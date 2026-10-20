@@ -141,3 +141,14 @@ class SecurityTests(unittest.TestCase):
         with patch('urllib.request.build_opener', side_effect=opener):
             with self.assertRaisesRegex(ValueError, 'stop before network'):
                 OllamaProvider('model').generate([Message('user', 'task')], [])
+
+    def test_ollama_redirect_closes_response_before_raising(self):
+        response = io.BytesIO(b'redirect response')
+        def opener(handler):
+            with self.assertRaises(ValueError):
+                handler.redirect_request(Request('http://localhost'), response, 302, '', {}, 'https://other')
+            self.assertTrue(response.closed)
+            raise ValueError('stop before network')
+        with patch('urllib.request.build_opener', side_effect=opener):
+            with self.assertRaisesRegex(ValueError, 'stop before network'):
+                OllamaProvider('model').generate([Message('user', 'task')], [])
