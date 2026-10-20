@@ -1,9 +1,10 @@
 # Vorschlag: Kontextverwaltung und SQLite-Persistenz
 
-**Status: teilweise umgesetzt, Stand Version 0.3.** Die regelbasierte Kontextauswahl
+**Status: teilweise umgesetzt, Stand Version 0.4.** Die regelbasierte Kontextauswahl
 (`recent`/`full`), Auswahlstatistiken und optionale Anbieter-Tokenwerte sind implementiert.
-SQLite, Speicher-Ports, Cache, Zusammenfassungen, TokenEstimator und relevante
-Dateiausschnitte sind weiterhin Vorschläge. Die folgende Gesamtarchitektur trennt
+Mehrteilige Konversation, Plan-/Implementierungsmodus und angeheftete Root-Regeln
+sind ebenfalls umgesetzt. SQLite, Speicher-Ports, Cache, Zusammenfassungen,
+TokenEstimator und relevante Dateiausschnitte sind weiterhin Vorschläge. Die folgende Gesamtarchitektur trennt
 bewusst die aktuelle Basis vom geplanten Ausbau; das SQL ist keine Migration.
 Details zum aktuellen Verhalten stehen in der [Architekturdokumentation](architecture.md).
 
@@ -29,14 +30,16 @@ aktuellen Umfang nicht erforderlich.
 
 ## Ausgangslage im Repository
 
-`Agent.run()` führt die gesamte Nachrichtenhistorie im Arbeitsspeicher. Jeder
+`Agent.run()` führt den aktiven Turn im Arbeitsspeicher; `ConversationState` hält
+optional alle erfolgreich abgeschlossenen Turns und den akzeptierten Plan. Jeder
 Modellaufruf erhält in Version 0.3 eine budgetierte Auswahl der neuesten vollständigen
 Runden oder im Modus `full` alle Nachrichten. Werkzeugausgaben werden vollständig
 als JSON-Text in der Originalhistorie behalten. `max_context_chars` ist weiterhin
 ein ungefähres Zeichenbudget. Auswahl findet statt, Komprimierung noch nicht.
 
 `JsonlEventSink` protokolliert nur Metadaten. Er ist weder Gesprächsspeicher noch
-Checkpoint. `RunResult.messages` existiert nur bei erfolgreichem Abschluss.
+Checkpoint. `RunResult.messages` entsteht nur bei erfolgreichem Abschluss; eine interaktive
+Sitzung behält frühere erfolgreiche Turns auch nach einem fehlgeschlagenen Folgeauftrag.
 `Workspace` liest und ersetzt Dateien, besitzt aber keine Versionsverwaltung
 für einzelne Dateistände. Diese Eigenschaften erklären, weshalb bloßes Speichern
 der bisherigen Historie in SQLite noch keine Tokenersparnis erzeugt.

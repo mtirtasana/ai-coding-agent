@@ -7,6 +7,7 @@ class ToolSpec:
     name: str
     description: str
     parameters: dict[str, Any]
+    read_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -72,3 +73,11 @@ class RunResult:
     steps: int
     messages: list[Message] = field(default_factory=list)
     requests: list[RequestMetrics] = field(default_factory=list)
+
+
+@dataclass
+class ConversationState:
+    """Only completed turns are committed; runtime instructions are supplied separately."""
+    messages: list[Message] = field(default_factory=list)
+    latest_plan: str | None = None
+    accepted_plan: str | None = None

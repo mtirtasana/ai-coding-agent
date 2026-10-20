@@ -6,6 +6,7 @@ from agent.adapters.events import JsonlEventSink
 from agent.adapters.tools import ToolRegistry, spec
 from agent.core.context import ContextLimitError, RuleBasedContextBuilder, context_chars
 from agent.core.engine import Agent, INSTRUCTIONS
+from agent.core.policy import MODE_INSTRUCTIONS
 from agent.core.types import Message, ModelResponse, ModelUsage, ToolCall
 
 
@@ -116,7 +117,8 @@ class LoopTests(unittest.TestCase):
     def test_long_run_sends_less_context_and_keeps_full_history(self):
         registry = self.tools()
         # Fits prefix + one round, but not two.
-        budget = context_chars([Message("system", INSTRUCTIONS), Message("user", "Task")],
+        budget = context_chars([Message("system", INSTRUCTIONS), Message("system", MODE_INSTRUCTIONS["implement"]),
+                                Message("user", "Task")],
                                registry.specifications()) + 350
         recent_model, full_model = self.model(), self.model()
         stream = StringIO()
@@ -126,7 +128,7 @@ class LoopTests(unittest.TestCase):
                      context_builder=RuleBasedContextBuilder("full")).run("Task")
         self.assertEqual(recent.text, full.text)
         self.assertEqual(recent.messages, full.messages)
-        self.assertEqual(len(recent.messages), 19)
+        self.assertEqual(len(recent.messages), 20)
         recent_chars = sum(r.context.selected_chars for r in recent.requests)
         full_chars = sum(r.context.selected_chars for r in full.requests)
         self.assertLess(recent_chars, full_chars)
@@ -136,7 +138,9 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(len([e for e in events if e["event"] == "context_selected"]), 9)
         self.assertGreater(recent.requests[-1].context.dropped_rounds, 0)
         for messages in recent_model.contexts:
-            self.assertEqual(messages[:2], (Message("system", INSTRUCTIONS), Message("user", "Task")))
+            self.assertEqual(messages[:3], (Message("system", INSTRUCTIONS),
+                                           Message("system", MODE_INSTRUCTIONS["implement"]),
+                                           Message("user", "Task")))
             for i, message in enumerate(messages):
                 if message.role == "tool":
                     self.assertEqual(messages[i - 1].tool_calls[0].id, message.call_id)

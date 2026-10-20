@@ -16,6 +16,29 @@ coding-agent "Projekt untersuchen" --provider demo --workspace . --verbose
 Die Demo führt deterministisch einen Verzeichnisaufruf aus. Sie ist kein KI-Modell.
 Unter Windows die Umgebung mit `.venv\Scripts\Activate.ps1` aktivieren.
 
+## Interaktives Terminal und Planungsmodus
+
+```bash
+pip install -e '.[terminal]'
+coding-agent --provider demo --allow-write
+```
+
+Ohne Aufgabe startet eine gemeinsame Sitzung im Modus `plan`. Tab ergänzt
+Slash-Befehle: `/plan`, `/implement`, `/instructions`, `/help`, `/new`, `/exit`.
+`/plan <Aufgabe>` plant lesend. `/implement` akzeptiert den letzten erfolgreichen
+Plan, wechselt den Modus und wartet auf die nächste Aufgabe. Schreibzugriff gibt
+es nur in `implement` mit `--allow-write`; `plan` bleibt immer lesend.
+Die Demo ist kein echtes Planungsmodell; für reale Aufgaben Ollama oder OpenAI wählen.
+
+Die Root-Datei `AGENTS.md` wird automatisch geladen und im Kontext behalten.
+`/instructions` zeigt den geladenen Stand, `/new` leert die Sitzung und lädt neu.
+Geschichte und Pläne bleiben ausschließlich im Arbeitsspeicher. Einzellauf-Aufrufe
+mit Aufgabe bleiben erhalten und verwenden standardmäßig `implement`;
+`--mode plan|implement` überschreibt den Standard.
+
+Die [Terminal-Dokumentation](docs/interactive.md) beschreibt Befehle, Berechtigungen,
+Planübergabe, Fehlerbehandlung und Architektur mit Diagrammen.
+
 ## Lokales Modell mit Ollama
 
 Ollama separat installieren, den Server starten und ein Modell mit Unterstützung
@@ -53,13 +76,16 @@ Kontextauswahl und Messung sind implementiert; SQLite, Cache und Zusammenfassung
 
 ```mermaid
 flowchart TD
-    CLI[CLI: Composition Root] --> Agent[Agent-Kern]
+    CLI[CLI: Composition Root] --> Shell[Terminal und Sitzung]
+    CLI --> Agent[Agent-Kern]
+    Shell --> Agent
     Agent --> Context[ContextBuilder]
     Agent --> Model[ModelProvider-Port]
     Model --> OpenAI[OpenAI-Adapter]
     Model --> Ollama[Ollama-Adapter]
     Model --> Demo[Offline-Demo]
-    Agent --> Tools[ToolExecutor-Port]
+    Agent --> Policy[ModeToolExecutor]
+    Policy --> Tools[ToolExecutor-Port]
     Tools --> Registry[ToolRegistry]
     Registry --> Workspace[Lokaler Workspace]
     Agent --> Events[EventSink-Port]
@@ -69,7 +95,10 @@ flowchart TD
 - `agent/core/types.py`: eigene Nachrichten, Aufrufe, Ergebnisse und Werkzeugschemas.
 - `agent/core/ports.py`: Python-Protokolle für Modelle, Werkzeuge und Ereignisse.
 - `agent/core/engine.py`: Beobachten → Kontextauswahl → Modellentscheidung → Werkzeug → Ergebnis.
-- `agent/core/context.py`: vollständige Runden auswählen und Zeichenbudget prüfen.
+- `agent/core/context.py`: vollständige Runden und Turns auswählen, Pflichtkontext behalten.
+- `agent/core/policy.py`: lesende Werkzeuge im Planungsmodus erzwingen.
+- `agent/terminal.py`: interaktive Eingabe, Slash-Befehle und gemeinsame Sitzung.
+- `agent/adapters/instructions.py`: Root-`AGENTS.md` als geprüften Snapshot laden.
 - `agent/adapters/models.py`: Übersetzung zwischen internen Typen und Anbieterformaten.
 - `agent/adapters/tools.py`: Werkzeugregistrierung, String-Argumentvalidierung und Fehlerergebnisse.
 - `agent/files.py`: lokaler Workspace mit bestehenden Pfadbeschränkungen.
@@ -95,14 +124,17 @@ und automatische Auswahl relevanter Dateiabschnitte sind noch nicht implementier
 ungefähren Zeichenumfang vor dem nächsten Aufruf, keine Tokens oder Kosten.
 Standard ist `--context-mode recent`: Systemanweisungen und Nutzeraufgabe bleiben
 immer erhalten, danach werden die neuesten vollständigen Assistant-/Werkzeugrunden
-bis zum Budget ausgewählt. Ältere Runden entfallen zuerst aus dem Modellkontext.
+bis zum Budget ausgewählt. Bei Folgeaufträgen bleiben zusätzlich die neueste
+Nutzeranfrage, Root-Projektregeln und ein akzeptierter Plan erhalten. Ältere
+abgeschlossene Turns werden nur vollständig ausgewählt. Ältere Inhalte können entfallen.
 Die vollständige Historie bleibt unverändert erhalten. Informationen aus älteren
 Runden können dem Modell deshalb fehlen; es gibt keine automatische Zusammenfassung.
 Passt bereits der Pflichtkontext oder die neueste Runde nicht hinein, wird abgebrochen.
 `--context-mode full` überträgt wie bisher die gesamte Historie oder bricht am Limit ab.
 Einzelne Nachrichten werden nie abgeschnitten.
 Bereits geschriebene Änderungen bleiben bei Abbruch oder API-Fehler bestehen.
-Jeder neue Lauf beginnt mit eigenem Kontext. `--verbose` schreibt Ereignisse
+Einzellauf-Aufrufe beginnen mit eigenem Kontext; das Terminal teilt abgeschlossene
+Turns innerhalb einer Sitzung. `--verbose` schreibt Ereignisse
 auf stderr; diese können mit `2>events.jsonl` gespeichert werden.
 `context_selected` zeigt ursprünglichen/ausgewählten Zeichenumfang, Nachrichtenzahl
 und entfernte Runden. `model_completed.usage` enthält verfügbare tatsächliche

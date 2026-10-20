@@ -1,6 +1,6 @@
 # Architektur des generischen Coding-Agenten
 
-Diese Dokumentation beschreibt die implementierte Architektur der Version 0.3.
+Diese Dokumentation beschreibt die implementierte Architektur der Version 0.4.
 Sie richtet sich an Entwicklerinnen und Entwickler, die den Agenten verstehen,
 einen Modellanbieter ergänzen oder neue Werkzeuge anbinden möchten.
 
@@ -31,7 +31,8 @@ Modell zurück, bis eine Abschlussantwort oder ein Limit erreicht ist.
 Aktuell gibt es drei Dateiwerkzeuge, Adapter für die OpenAI Responses API und
 Ollamas Chat API sowie eine deterministische Offline-Demo. Der Kern arbeitet
 synchron und führt Werkzeugaufrufe nacheinander aus. Es gibt einen Agenten pro
-Lauf, keine verteilten Dienste und keine Datenbank.
+Lauf, keine verteilten Dienste und keine Datenbank. Eine interaktive Sitzung teilt
+abgeschlossene Turns und akzeptierte Pläne im Arbeitsspeicher.
 
 Die Bezeichnung „generisch“ bezieht sich auf austauschbare Modellanbieter und
 bearbeitbare Projekte. Sie bedeutet nicht, dass jedes Modell dieselben Fähigkeiten
@@ -41,7 +42,9 @@ nötig. Das Grundgerüst führt noch keine Tests, Builds oder Git-Befehle selbst
 ## Design Pattern: Ports and Adapters
 
 Das zentrale Muster ist **Ports and Adapters**, auch hexagonale Architektur.
-Der Kern beschreibt die Arbeit und die benötigten Fähigkeiten. Ports definieren
+Der Kern beschreibt die Arbeit und die benötigten Fähigkeiten. Interaktives Terminal,
+Moduswechsel und Root-Projektregeln sind zusätzlich in der
+[Terminal-Dokumentation](interactive.md) erläutert. Ports definieren
 Verträge für diese Fähigkeiten. Adapter erfüllen die Verträge mit konkreten
 Bibliotheken, APIs oder Dateisystemzugriffen.
 
@@ -119,6 +122,9 @@ Hier werden konkrete Objekte ausgewählt, erzeugt und miteinander verbunden.
 | --- | --- | --- |
 | `agent/core/engine.py` | Arbeitszyklus, Historie, Limits und Abschluss | HTTP, Modellformate, Dateizugriffe |
 | `agent/core/context.py` | Protokollvalidierung, Rundenauswahl und Zeichenbudget | Dateisuche und Zusammenfassung |
+| `agent/core/policy.py` | Planungsmodus auf explizit lesende Werkzeuge begrenzen | Terminaleingabe |
+| `agent/terminal.py` | Befehle, Completion, Modus und Sitzung | Modellformate und Dateizugriffe |
+| `agent/adapters/instructions.py` | Root-Projektregeln über Workspace laden | Modusberechtigungen |
 | `agent/core/ports.py` | Verträge für Modell, Werkzeuge und Ereignisse | Konkrete Implementierungen |
 | `agent/core/types.py` | Gemeinsame anbieterunabhängige Datentypen | SDK-Typen und Persistenz |
 | `agent/adapters/models.py` | Übersetzung und Modellkommunikation | Werkzeugausführung |
@@ -238,8 +244,10 @@ Das verhindert das Neuzuweisen ihrer Felder; verschachtelte Dictionaries wie
 
 ## Agent-Kern und Arbeitszyklus
 
-`Agent.run(task)` startet bei jedem Aufruf mit einer frischen Historie aus den
-festen Systemanweisungen und der Nutzeraufgabe. Die verfügbaren Werkzeuge werden
+`Agent.run(task)` startet ohne expliziten Zustand weiterhin mit einer frischen
+Historie. `Agent.run(task, state)` ergänzt dagegen die abgeschlossene Konversation
+in `ConversationState` um einen neuen lokalen Turn. Systemanweisungen werden für
+aktuellen Modus, geladene Projektregeln und akzeptierten Plan neu aufgebaut. Die verfügbaren Werkzeuge werden
 zu Beginn als Tuple übernommen. Ein dynamischer Werkzeugwechsel während eines
 Laufs ist derzeit nicht vorgesehen.
 
@@ -283,10 +291,15 @@ ist. Das ist eine Steuerungsentscheidung, kein Nachweis, dass die Nutzeraufgabe
 inhaltlich erfüllt wurde. Die Implementierung hat noch keinen unabhängigen
 Ergebnisprüfer und keine automatische Erfolgsmessung.
 
-`AGENTS.md` wird nicht automatisch eingelesen oder vorab injiziert. Die festen
-Systemanweisungen fordern das Modell auf, die Datei zu beachten, falls vorhanden;
-das Modell muss sie mit `read_file` selbst lesen. Ebenso gibt es noch keinen
-separaten Planer oder eine automatische Suche nach relevanten Dateien.
+Die CLI lädt die Root-`AGENTS.md` automatisch über einen Workspace-Adapter.
+Direkte Kern-Aufrufer liefern `project_instructions` explizit. Regeln und ein
+akzeptierter Plan werden als separate Systemnachrichten im Pflichtkontext gehalten.
+Der Planungsmodus registriert und erlaubt nur Werkzeuge mit `read_only=True`;
+der Implementierungsmodus erhält Schreibwerkzeuge nur bei freigegebenem Workspace.
+
+Es gibt weiterhin keinen separaten Planer und keine automatische Auswahl relevanter
+Dateien. Der Modus verändert Instruktionen und Berechtigungen desselben Agenten.
+
 
 ## Modelladapter
 
@@ -413,33 +426,29 @@ Dateien sind nach dem Lauf über Git-Diffs und passende Tests zu prüfen.
 
 ## Kontext, Limits und Fehler
 
-Die Historie lebt ausschließlich in `Agent.run()`. Sie enthält Systemanweisungen,
-Aufgabe, Assistant-Antworten und Werkzeugergebnisse. Der `ContextBuilder` erhält
-diese vollständige Historie und liefert eine separate Projektion für das Modell.
-Es gibt keine Zusammenfassung, Vektordatenbank, Persistenz oder Wiederaufnahme.
+Ein laufender Turn lebt lokal in `Agent.run()`. Optional wird er nach erfolgreichem
+Abschluss an `ConversationState.messages` angehängt. Fehler und Unterbrechungen
+verwerfen diesen Turn aus dem Gespräch, rollen Dateischreibvorgänge aber nicht zurück.
+`latest_plan` und `accepted_plan` sind getrennte Felder der Sitzung. Der Terminalbefehl
+`/implement` akzeptiert den letzten erfolgreichen Plan ohne automatischen Modellaufruf.
 
-Standard ist `RuleBasedContextBuilder(mode="recent")`. Er validiert vor der Auswahl
-das Protokoll: führende Systemnachrichten und genau eine ursprüngliche Nutzeraufgabe,
-danach Assistant-Runden mit sämtlichen zugehörigen Werkzeugergebnissen. Zusätzliche
-Nutzernachrichten während eines Laufs werden derzeit nicht unterstützt.
+Der `ContextBuilder` erhält führende Systemnachrichten und mehrere Nutzer-Turns.
+Jeder abgeschlossene ältere Turn muss mit einer finalen Assistant-Antwort enden.
+Ein aktiver Turn darf mit einer vollständigen Werkzeugrunde enden. Ungültige,
+fehlende oder doppelte Ergebnisse werden auch in später entfernten Runden abgewiesen.
 
-Systemnachrichten und Aufgabe bleiben erhalten. Der Builder fügt die neuesten
-vollständigen Runden rückwärts hinzu und liefert sie in ursprünglicher Reihenfolge.
-Sobald eine ältere Runde nicht mehr passt, entfallen sie und alle davorliegenden
-Runden. Es entstehen keine Lücken durch das Überspringen einer großen mittleren
-Runde. Alte Informationen können dadurch fehlen; Projektregeln aus einer älteren
-`read_file`-Antwort werden nicht separat angeheftet.
+`recent` behält Systemanweisungen, Modus, Root-Regeln, akzeptierten Plan, ursprüngliche
+Aufgabe und neuesten Nutzerauftrag. Neueste aktive Runden haben Vorrang; passt die
+jüngste nicht vollständig, wird abgebrochen. Danach passen gegebenenfalls weitere
+aktive Runden und schließlich ältere abgeschlossene Turns als ganze Einheiten hinein.
+Quellreihenfolge und Werkzeugzuordnung bleiben erhalten. Nachrichten werden weder
+abgeschnitten noch zusammengefasst. `full` behält die vollständige Quelle oder bricht ab.
 
-Die neueste Runde ist Pflicht. Überschreitet sie mit dem festen Kontext und den
-Werkzeugschemas das Budget, wird abgebrochen. Es werden keine einzelnen Nachrichten
-oder Resultate abgeschnitten. `mode="full"` behält den kompletten Verlauf und das
-bisherige Abbruchverhalten bei. Keine der beiden Varianten verändert die Quelle.
-
-`ContextSelection` enthält die ausgewählten Nachrichten und `ContextStats`:
-`full_chars`, `selected_chars`, `full_messages`, `selected_messages`, `dropped_rounds`.
-Die Zähler beziehen sich auf den Verlauf vor der aktuellen Modellantwort.
-Fehlende, doppelte oder verwaiste Werkzeugergebnisse sind Protokollfehler und
-werden auch dann abgewiesen, wenn die betreffende alte Runde entfernt würde.
+`ContextSelection` enthält Nachrichten und `ContextStats`: `full_chars`,
+`selected_chars`, `full_messages`, `selected_messages`, `dropped_rounds`.
+Die Quelle bleibt unverändert. In einer Sitzung bedeutet das nicht, dass das Modell
+immer alle früheren Details sieht; nur der feste Kontext ist garantiert erhalten.
+Es gibt keine Datenbank, persistente Sitzung oder Wiederaufnahme nach Prozessende.
 
 ```mermaid
 stateDiagram-v2
@@ -491,7 +500,7 @@ den Stream-Puffer sofort. Die CLI aktiviert ihn mit `--verbose` auf stderr.
 
 | Ereignis | Daten |
 | --- | --- |
-| `run_started` | `max_steps` |
+| `run_started` | `max_steps`, `mode` |
 | `context_selected` | `step`, `full_chars`, `selected_chars`, `full_messages`, `selected_messages`, `dropped_rounds` |
 | `model_completed` | `step`, `tool_calls`, `usage` (optional verfügbare Tokenwerte) |
 | `tool_completed` | `name`, `ok` |
@@ -517,7 +526,8 @@ aus. Damit bleiben Konfigurationsdetails außerhalb des Kerns.
 
 | Option | Standard und Bedeutung |
 | --- | --- |
-| `task` | Erforderliche Aufgabe als Positionsargument |
+| `task` | Optional; ohne Aufgabe startet das interaktive Terminal |
+| `--mode` | `plan` oder `implement`; Standard interaktiv `plan`, im Einzellauf `implement` |
 | `--workspace` | Aktuelles Arbeitsverzeichnis |
 | `--provider` | `AGENT_PROVIDER`, sonst `openai`; Auswahl `openai`, `ollama`, `demo` |
 | `--model` | `AGENT_MODEL`; bei OpenAI danach `OPENAI_MODEL`, sonst `gpt-4.1` |
@@ -532,6 +542,8 @@ Ollama benötigt einen explizit oder über `AGENT_MODEL` gewählten Modellnamen.
 OpenAI benötigt `OPENAI_API_KEY` und die optionale Installation
 `pip install -e '.[openai]'`. `pip install -e .` installiert nur das Grundgerüst.
 Die Demo benötigt keine Schlüssel und ignoriert die fachliche Aufgabe.
+Das Terminal benötigt zusätzlich `pip install -e '.[terminal]'`. Eine einzelne Aufgabe
+benötigt diese Abhängigkeit nicht. Details: [Terminal und Sitzungen](interactive.md).
 
 ## Erweiterungen implementieren
 
@@ -609,7 +621,11 @@ mehrere Werkzeuge pro Runde, ungültige Protokolle und einen längeren Vergleich
 `tests/test_usage.py` prüft echte, fehlende und teilweise Nutzungswerte sowie
 Ollama-Aufruf-IDs bei gleichbleibender Kontextlänge.
 
-Der dokumentierte Implementierungsstand besteht aus 31 erfolgreichen lokalen
+Die Terminal- und Sitzungstests prüfen Modusberechtigungen, lokale Befehle,
+Root-Instruktionen, mehrteilige Kontexte und Wiederverwendbarkeit nach Fehlern.
+Ein echter Prompt-Test prüft Tab-Completion mit `prompt-toolkit`.
+
+Der dokumentierte Implementierungsstand besteht aus 56 erfolgreichen lokalen
 Tests und einem ausgeführten Offline-CLI-Durchlauf. Das belegt die getesteten
 Verträge und Pfade, keine erfolgreiche Kommunikation mit echten Modellservern.
 Live-Tests, Kompatibilitätsprüfungen mehrerer Modelle und eine Überprüfung der
@@ -620,6 +636,8 @@ inhaltlichen Coding-Ergebnisse bleiben separate Aufgaben.
 | Entscheidung | Begründung | Konsequenz |
 | --- | --- | --- |
 | Ein synchroner Agent | Einfacher, nachvollziehbarer Start | Keine parallelen Modell- oder Werkzeugaufrufe |
+| Sitzung nur im Arbeitsspeicher | Einfache Folgeaufträge und Planübergabe | Keine Fortsetzung nach Prozessende |
+| Modusprüfung im Kern | Planungsmodus kann keine Schreibwerkzeuge aufrufen | Eigene lesende Werkzeuge müssen `read_only=True` deklarieren |
 | Eigene Datentypen | Anbieterwechsel ohne SDK-Typen im Kern | Adapter müssen Formate und Besonderheiten abbilden |
 | Protocol statt Pflicht-Basisklasse | Leichte Testdoubles und geringe Kopplung | Keine automatische Laufzeitprüfung der Verträge |
 | OpenAI als optionale Abhängigkeit | Lokaler Betrieb ohne Cloud-SDK | OpenAI muss separat installiert werden |

@@ -3,15 +3,15 @@ import json
 from agent.core.types import ToolResult, ToolSpec
 
 
-def spec(name, description, properties):
+def spec(name, description, properties, *, read_only=False):
     return ToolSpec(name, description, {"type": "object", "properties": properties,
-                    "required": list(properties), "additionalProperties": False})
+                    "required": list(properties), "additionalProperties": False}, read_only)
 
 
 PATH = {"type": "string", "description": "Pfad relativ zum Workspace"}
 FILE_TOOLS = (
-    spec("list_files", "Listet ein Verzeichnis.", {"path": PATH}),
-    spec("read_file", "Liest eine UTF-8-Datei.", {"path": PATH}),
+    spec("list_files", "Listet ein Verzeichnis.", {"path": PATH}, read_only=True),
+    spec("read_file", "Liest eine UTF-8-Datei.", {"path": PATH}, read_only=True),
     spec("write_file", "Erstellt oder ersetzt eine UTF-8-Datei.",
          {"path": PATH, "content": {"type": "string"}}),
 )
