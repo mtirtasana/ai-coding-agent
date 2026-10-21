@@ -30,7 +30,7 @@ class ProductionFixture(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
+        self.root = Path(temp.name).resolve()
         self.project = self.root / 'project'
         self.project.mkdir()
         env = patch.dict(os.environ, {'AGENT_STATE_DIR': str(self.root / 'state'), 'AGENT_CONFIG_DIR': str(self.root / 'config')})

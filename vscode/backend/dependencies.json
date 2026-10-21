@@ -145,6 +145,15 @@
       ]
     },
     {
+      "name": "colorama",
+      "version": "0.4.6",
+      "license": "",
+      "source": "https://pypi.org/project/colorama/0.4.6/",
+      "wheel_sha256": [
+        "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"
+      ]
+    },
+    {
       "name": "cryptography",
       "version": "50.0.2",
       "license": "Apache-2.0 OR BSD-3-Clause",

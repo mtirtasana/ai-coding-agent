@@ -14,7 +14,9 @@ from packaging.markers import default_environment
 
 def lock():
     targets = [dict(default_environment(), sys_platform=system, python_version=version,
-                    python_full_version=version + '.0', extra='')
+                    python_full_version=version + '.0', extra='',
+                    platform_system={'linux': 'Linux', 'darwin': 'Darwin', 'win32': 'Windows'}[system],
+                    os_name='nt' if system == 'win32' else 'posix')
                for system in ('linux', 'darwin', 'win32') for version in ('3.11', '3.14')]
     def closure(roots):
         names, pending = set(), list(roots)
