@@ -3,6 +3,7 @@
   "cases": [
     {"path": "main.py", "denied": false, "ignored": false},
     {"path": "trace.log", "denied": false, "ignored": true},
+    {"path": "TRACE.LOG", "denied": false, "ignored": false},
     {"path": "keep.log", "denied": false, "ignored": false},
     {"path": "build/output.py", "denied": false, "ignored": true},
     {"path": "nested/drop.tmp", "denied": false, "ignored": true},

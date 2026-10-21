@@ -38,7 +38,8 @@ outside the project. This release adds no container sandbox.
 `.gitignore` rules, including nested rules, affect list/search discovery. An
 explicit file read can access a Git-ignored file. Root `.agentignore` uses the
 same Git-style patterns but denies reads, attachments, snapshots and edits as
-well. A denied parent cannot be reopened by directly naming a child. The policy
+well. Pattern matching is case-sensitive consistently across hosts; protected
+credential names are case-insensitive. A denied parent cannot be reopened by directly naming a child. The policy
 is reloaded as files change; malformed, oversized or symlinked policy files fail
 closed. Protected credential paths apply before configurable rules, including
 `.env*`, `.git`, `.ssh`, `.aws`, `.azure`, `.config`, private-key names and common

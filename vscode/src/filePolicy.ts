@@ -12,9 +12,9 @@ export class FilePolicy {
       if (info.isSymbolicLink() || info.size > 262144) throw Error("Invalid ignore policy file.");
       const text = new TextDecoder("utf-8", { fatal: true }).decode(await fs.readFile(file));
       if ([...text].length > 65536) throw Error("Ignore policy is too large.");
-      return ignore().add(text);
+      return ignore({ ignorecase: false }).add(text);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return ignore();
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return ignore({ ignorecase: false });
       throw error;
     }
   }
