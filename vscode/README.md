@@ -105,6 +105,7 @@ and invalidates execution permissions.
 From this directory, with Node 22+ and Python 3.11–3.14:
 
 ```bash
+python -m pip install --require-hashes --only-binary=:all: -r backend/runtime-base.txt
 npm ci
 npm run typecheck
 npm run lint

@@ -192,6 +192,8 @@ Maintainers refresh locks explicitly with `tools/lock_runtime.py`, review the
 diff, run advisory audits and test the OS/interpreter matrix. Do not refresh them
 implicitly during a user installation. The build uses a prepared setuptools
 environment with build isolation disabled; release CI installs the reviewed lock.
+Source builds must first install `vscode/backend/runtime-base.txt` with
+`pip install --require-hashes --only-binary=:all: -r`; extension CI does the same.
 
 The editor verifies the wheel and lock manifests, creates a separate candidate
 environment, installs locked binary dependencies with `--require-hashes`, installs
