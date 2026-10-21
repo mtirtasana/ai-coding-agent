@@ -16,6 +16,16 @@ const root = path.resolve(__dirname, "..");
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "agent-vscode-native-"));
 const version = process.env.VSCODE_TEST_VERSION || "stable";
 (async () => {
+  // GUI startup on macOS can resolve a different shell PATH than the CI step.
+  // Resolve and verify the installed test backend before launching the editor.
+  const interpreter = spawnSync(
+    process.env.AGENT_TEST_PYTHON || (process.platform === "win32" ? "python" : "python3"),
+    ["-I", "-c", "import agent.server; import sys; print(sys.executable)"],
+    { encoding: "utf8", shell: false },
+  );
+  const testPython = interpreter.stdout?.trim();
+  if (interpreter.status !== 0 || !testPython || !path.isAbsolute(testPython))
+    throw Error("AGENT_TEST_PYTHON must resolve to an interpreter with the root project installed.");
   let executable = await downloadAndUnzipVSCode({ version });
   // Recent macOS bundles can rename the executable; Info.plist is authoritative.
   if (process.platform === "darwin") {
@@ -81,7 +91,7 @@ const version = process.env.VSCODE_TEST_VERSION || "stable";
       "--extensions-dir",
       path.join(fixture, "test-extensions"),
     ],
-    extensionTestsEnv: { AGENT_NATIVE_ROOT: fixture },
+    extensionTestsEnv: { AGENT_NATIVE_ROOT: fixture, AGENT_TEST_PYTHON: testPython },
   });
 })().then(
   () => {
