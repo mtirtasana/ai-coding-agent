@@ -59,6 +59,10 @@ class ToolRegistry:
 def workspace_tools(workspace, *, enhanced=True, test_runner=None, lint_runner=None, lint_fix_runner=None,
                     security_runner=None, dependency_audit_runner=None, range_reads=True):
     registry = ToolRegistry()
+    from .check_output import CheckOutputStore, register_output_reader
+    outputs = CheckOutputStore()
+    def check_handler(runner):
+        return lambda: outputs.present(runner.as_tool())
     for specification in FILE_TOOLS:
         if specification.name == "write_file" and not workspace.allow_write:
             continue
@@ -87,18 +91,21 @@ def workspace_tools(workspace, *, enhanced=True, test_runner=None, lint_runner=N
                                    edit_args), files.apply)
     if test_runner is not None:
         registry.register(spec("run_tests", "Run the user-configured test command. Check passed and exit_code.",
-                               {}), test_runner.as_tool)
+                               {}), check_handler(test_runner))
     if lint_runner is not None:
         registry.register(spec("run_lint", "Run the configured lint check. Check passed and exit_code.",
-                               {}), lint_runner.as_tool)
+                               {}), check_handler(lint_runner))
     if lint_fix_runner is not None and workspace.allow_write:
         registry.register(spec("run_lint_fix", "Run the configured fixer, then lint again. May edit files; rerun tests afterward.",
-                               {}), lint_fix_runner.as_tool)
+                               {}), check_handler(lint_fix_runner))
     for name, runner, description in (
         ('run_security', security_runner, 'Run the configured static security check.'),
         ('run_dependency_audit', dependency_audit_runner, 'Run the configured dependency vulnerability audit; may access the network.'),
     ):
         if runner is not None:
             registry.register(spec(name, description + ' Check passed, exit_code and output; a pass is not a safety guarantee.',
-                                   {}), runner.as_tool)
+                                   {}), check_handler(runner))
+    if any(runner is not None for runner in (test_runner, lint_runner, lint_fix_runner,
+                                            security_runner, dependency_audit_runner)):
+        register_output_reader(registry, outputs)
     return registry

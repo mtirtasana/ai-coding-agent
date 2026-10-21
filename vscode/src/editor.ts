@@ -7,6 +7,7 @@ import {
   relativePath,
   protectedPart,
   replaceUnique,
+  replacementDiff,
   sha,
   validateText,
   lineRange,
@@ -308,13 +309,7 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
         throw Error("Stale file snapshot.");
       const after = replaceUnique(snap.text, args.old_text, args.new_text);
       if (name === "preview_edit") {
-        const oldLines = snap.text.split("\n"),
-          newLines = after.split("\n");
-        const diff =
-          `--- ${pathArg}\n+++ ${pathArg}\n@@ -1,${oldLines.length} +1,${newLines.length} @@\n` +
-          oldLines.map((l) => "-" + l).join("\n") +
-          "\n" +
-          newLines.map((l) => "+" + l).join("\n");
+        const diff = replacementDiff(pathArg, snap.text, after);
         return {
           ok: true,
           content: JSON.stringify({

@@ -23,7 +23,9 @@ def friendly_error(exc):
     if isinstance(exc, ImportError):
         return "Provider dependencies are missing. Install the optional .[openai] extra for OpenAI/compatible APIs."
     if name == 'ContextLimitError':
-        return 'Context budget exceeded. Narrow attachments, start /new, or increase --max-context-chars.'
+        return 'Context budget exceeded. Narrow attachments, start /new, or review --max-context-chars and --max-context-tokens (including the output reserve).'
+    if name == 'TokenBudgetError':
+        return 'Run token budget reached before another request. Inspect existing changes and review --max-run-tokens.'
     if name == 'StepLimitError':
         return 'Step limit reached. Inspect changes before submitting another task or increasing --max-steps.'
     if name == 'OutputLimitError':
@@ -49,8 +51,11 @@ class RunObserver:
         self.usage = []
         self.checks = []
         self.selected_chars = 0
+        self.token_estimates = []
 
     def emit(self, kind, data):
+        if kind == 'token_estimated':
+            self.token_estimates.append((data['estimated_input_tokens'], data['method']))
         if kind == 'run_started':
             self.reset()
         elif kind == 'context_selected':
@@ -104,6 +109,10 @@ class RunObserver:
                           if values else f'{label}: unknown')
         self.output('Tokens: ' + '; '.join(fields))
         self.output(f'Context: {self.selected_chars} cumulative selected characters (not tokens)')
+        if self.token_estimates:
+            self.output(f'Input estimates: {sum(value for value, _ in self.token_estimates)} cumulative '
+                        f'({", ".join(sorted({method for _, method in self.token_estimates}))}); '
+                        'separate from recorded provider usage')
 
 
 class EventFanout:

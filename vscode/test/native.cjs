@@ -44,6 +44,11 @@ exports.run = async () => {
   assert.equal(range.content, "value = 1\n");
   assert.equal(range.total_lines, 2);
   assert.equal(range.sha256, snapshot.sha256);
+  const preview = await tools.execute('preview_edit', { path: 'review.py', expected_sha256: range.sha256,
+    old_text: 'value = 1', new_text: 'value = 2' }, 'plan', () => true);
+  assert.equal(preview.ok, true, preview.content);
+  assert(JSON.parse(preview.content).diff.includes('-value = 1\n+value = 2\n'));
+  assert.equal(doc.getText(), snapshot.content);
   const denied = await tools.execute(
     "apply_edit",
     {

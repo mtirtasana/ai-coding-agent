@@ -256,6 +256,11 @@ See [ADR-0004](adr/0004-capability-based-planning.md).
 
 ## 6. Context selection
 
+Optional `compact` projection and token-budget guards extend the default policy
+below. Their reference semantics, output reserves, estimator limits and accuracy
+gates are specified in [token efficiency](token-efficiency.md) and
+[ADR-0024](adr/0024-token-efficient-context.md). `recent` remains unchanged by default.
+
 `RuleBasedContextBuilder` validates the complete source history using
 `split_turns`, then selects whole message groups. Tool responses must match
 unique call IDs in their round. Older turns must finish before a later user turn

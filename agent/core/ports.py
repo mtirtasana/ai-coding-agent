@@ -1,6 +1,7 @@
 from typing import Protocol, Sequence
 
 from .types import ContextSelection, Message, ModelResponse, ToolCall, ToolResult, ToolSpec
+from .tokens import TokenEstimate
 
 
 class ModelProvider(Protocol):
@@ -10,6 +11,10 @@ class ModelProvider(Protocol):
 class ContextBuilder(Protocol):
     def build(self, messages: Sequence[Message], tools: Sequence[ToolSpec],
               max_chars: int) -> ContextSelection: ...
+
+
+class TokenEstimator(Protocol):
+    def estimate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> TokenEstimate: ...
 
 
 class ToolExecutor(Protocol):

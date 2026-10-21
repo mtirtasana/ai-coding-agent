@@ -1,6 +1,69 @@
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 export type Profile = "test" | "lint" | "security" | "dependency_audit";
+interface CompletionCancellation {
+  isCancellationRequested: boolean;
+  onCancellationRequested(callback: () => void): { dispose(): void };
+}
+interface CompletionEntry {
+  key: string;
+  result: Promise<string>;
+  cancel: () => void;
+  settled: boolean;
+  completedAt: number;
+  consumers: number;
+}
+export class CompletionCache {
+  private entry?: CompletionEntry;
+  readonly stats = { requested: 0, reused: 0, discarded: 0 };
+  clear() {
+    const previous = this.entry;
+    this.entry = undefined;
+    if (previous && !previous.settled) previous.cancel();
+  }
+  async get(key: string, token: CompletionCancellation,
+    start: () => { result: Promise<string>; cancel: () => void }): Promise<string | undefined> {
+    if (token.isCancellationRequested) return undefined;
+    let entry = this.entry;
+    if (!entry || entry.key !== key || (entry.settled && Date.now() - entry.completedAt > 10000)) {
+      this.clear();
+      const task = start();
+      this.stats.requested++;
+      entry = { key, result: task.result, cancel: task.cancel, settled: false, completedAt: 0, consumers: 0 };
+      this.entry = entry;
+      const current = entry;
+      entry.result = task.result.then(text => {
+        current.settled = true;
+        current.completedAt = Date.now();
+        if (!text && this.entry === current) this.entry = undefined;
+        return text;
+      }, error => {
+        current.settled = true;
+        if (this.entry === current) this.entry = undefined;
+        throw error;
+      });
+    } else this.stats.reused++;
+    const current = entry;
+    current.consumers++;
+    let cancelled = false;
+    let listener: { dispose(): void } | undefined;
+    const cancellation = new Promise<undefined>(resolve => {
+      listener = token.onCancellationRequested(() => { cancelled = true; resolve(undefined); });
+      if (token.isCancellationRequested) { cancelled = true; resolve(undefined); }
+    });
+    try {
+      return await Promise.race([current.result, cancellation]);
+    } finally {
+      listener?.dispose();
+      current.consumers--;
+      if (cancelled) this.stats.discarded++;
+      if (!current.settled && current.consumers === 0) {
+        current.cancel();
+        if (this.entry === current) this.entry = undefined;
+      }
+    }
+  }
+}
 export interface Check {
   command: string[];
   timeout?: number;
@@ -17,6 +80,27 @@ export const protectedPart = (p: string) =>
   p.toLowerCase().startsWith(".env") || /\.(pem|key|p12|pfx)$/i.test(p);
 export const sha = (s: string | Buffer) =>
   createHash("sha256").update(s).digest("hex");
+export function replacementDiff(name: string, before: string, after: string): string {
+  const lines = (text: string) => (text.match(/[^\n]*\n|[^\n]+$/g) || []);
+  const oldLines = lines(before), newLines = lines(after);
+  let prefix = 0, suffix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length &&
+    oldLines[prefix] === newLines[prefix]) prefix++;
+  if (prefix === oldLines.length && prefix === newLines.length) return "";
+  while (suffix < oldLines.length - prefix && suffix < newLines.length - prefix &&
+    oldLines[oldLines.length - suffix - 1] === newLines[newLines.length - suffix - 1]) suffix++;
+  const start = Math.max(0, prefix - 3);
+  const oldEnd = Math.min(oldLines.length, oldLines.length - suffix + 3);
+  const newEnd = Math.min(newLines.length, newLines.length - suffix + 3);
+  const emit = (sign: string, line: string) => sign + line +
+    (line.endsWith("\n") ? "" : "\n\\ No newline at end of file\n");
+  let diff = `--- ${name}\n+++ ${name}\n@@ -${oldEnd === start ? start : start + 1},${oldEnd - start} +${newEnd === start ? start : start + 1},${newEnd - start} @@\n`;
+  for (let i = start; i < prefix; i++) diff += emit(" ", oldLines[i]);
+  for (let i = prefix; i < oldLines.length - suffix; i++) diff += emit("-", oldLines[i]);
+  for (let i = prefix; i < newLines.length - suffix; i++) diff += emit("+", newLines[i]);
+  for (let i = oldLines.length - suffix; i < oldEnd; i++) diff += emit(" ", oldLines[i]);
+  return diff;
+}
 export function lineRange(text: string, start: unknown, end: unknown) {
   if (
     typeof start !== "number" ||

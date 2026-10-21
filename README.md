@@ -1,5 +1,9 @@
 # Generischer KI-Coding-Agent
 
+Tokenverbrauch reduzieren: [Kontextsteuerung, abrufbare Prüfausgaben und Tokenbudgets](docs/token-efficiency.md).
+`--context-mode compact` aktiviert optionale Historienkomprimierung;
+`--max-context-tokens` und `--max-run-tokens` setzen zusätzliche geschätzte Limits.
+
 Ein Python-Grundgerüst mit einem anbieterunabhängigen Agent-Kern. Modelle und
 Werkzeuge werden über Schnittstellen eingebunden. Keine ChatGPT-Mitgliedschaft
 nötig. Unterstützt werden Python 3.11–3.14.

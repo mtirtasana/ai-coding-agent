@@ -10,7 +10,65 @@ const {
   sameStamp,
   providerKey,
   lineRange,
+  replacementDiff,
+  CompletionCache,
 } = require("../dist/shared.cjs");
+test("replacement previews contain bounded context, accurate coordinates and newline markers", () => {
+  const before = Array.from({ length: 1000 }, (_, i) => `line ${i}\n`).join("");
+  const after = before.replace("line 500\n", "changed 😀\n");
+  const diff = replacementDiff("a.txt", before, after);
+  assert.match(diff, /@@ -498,7 \+498,7 @@/);
+  assert.match(diff, /-line 500\n\+changed 😀\n/);
+  assert(!diff.includes("line 0\n"));
+  assert(diff.length < 250);
+  assert.equal(replacementDiff("a", "same", "same"), "");
+  assert.equal(replacementDiff("a", "", "new\n"), "--- a\n+++ a\n@@ -0,0 +1,1 @@\n+new\n");
+  assert.equal(replacementDiff("a", "old\n", ""), "--- a\n+++ a\n@@ -1,1 +0,0 @@\n-old\n");
+  assert.equal(replacementDiff("a", "old", "new"), "--- a\n+++ a\n@@ -1,1 +1,1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n");
+  assert.match(replacementDiff("a", "one\r\ntwo\r\n", "one\r\nthree\r\n"), / one\r\n-two\r\n\+three\r\n/);
+});
+function cancellation() {
+  const listeners = new Set();
+  return {
+    isCancellationRequested: false,
+    onCancellationRequested(fn) { listeners.add(fn); return { dispose: () => listeners.delete(fn) }; },
+    cancel() { this.isCancellationRequested = true; for (const fn of [...listeners]) fn(); },
+    listeners,
+  };
+}
+test("identical inline requests share inference and cancellation keeps other consumers alive", async () => {
+  const cache = new CompletionCache();
+  let resolve, cancelled = 0, started = 0;
+  const start = () => { started++; return { result: new Promise(done => { resolve = done; }), cancel: () => cancelled++ }; };
+  const first = cancellation(), second = cancellation();
+  const a = cache.get("same", first, start), b = cache.get("same", second, start);
+  first.cancel();
+  assert.equal(await a, undefined);
+  assert.equal(cancelled, 0);
+  resolve("suggestion");
+  assert.equal(await b, "suggestion");
+  assert.equal(await cache.get("same", cancellation(), start), "suggestion");
+  assert.equal(started, 1);
+  assert.deepEqual(cache.stats, { requested: 1, reused: 2, discarded: 1 });
+  assert.equal(first.listeners.size + second.listeners.size, 0);
+});
+test("obsolete inline inference is cancelled and errors and expired results are not reused", async () => {
+  const cache = new CompletionCache();
+  let cancelled = 0;
+  const token = cancellation();
+  const pending = cache.get("old", token, () => ({ result: new Promise(() => {}), cancel: () => cancelled++ }));
+  token.cancel();
+  assert.equal(await pending, undefined);
+  assert.equal(cancelled, 1);
+  await assert.rejects(cache.get("error", cancellation(), () => ({ result: Promise.reject(Error("offline")), cancel() {} })));
+  assert.equal(await cache.get("error", cancellation(), () => ({ result: Promise.resolve("recovered"), cancel() {} })), "recovered");
+  const original = Date.now;
+  try {
+    Date.now = () => original() + 11000;
+    assert.equal(await cache.get("error", cancellation(), () => ({ result: Promise.resolve("fresh"), cancel() {} })), "fresh");
+  } finally { Date.now = original; }
+  cache.clear();
+});
 test("line ranges preserve logical endings, Unicode and explicit empty/EOF metadata", () => {
   for (const ending of ["\n", "\r\n", "\r"]) {
     const text = `alpha${ending}😀 café${ending}last`;

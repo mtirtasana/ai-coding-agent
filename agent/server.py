@@ -12,8 +12,8 @@ from agent.adapters.execution import LocalCommandRunner
 from agent.adapters.models import DemoProvider, OllamaProvider, OpenAICompatibleProvider, OpenAIProvider
 from agent.adapters.tools import ToolRegistry, spec, workspace_tools
 from agent.core.cancellation import CancellationToken, RunCancelled
-from agent.core.context import split_turns
-from agent.core.engine import Agent
+from agent.core.context import ContextLimitError, split_turns
+from agent.core.engine import Agent, TokenBudgetError
 from agent.core.types import ConversationState, Message, ToolCall, ToolResult
 from agent.files import Workspace
 from agent.adapters.usage import UsageJournal, MeteredProvider
@@ -83,6 +83,8 @@ class EditorTools(ToolRegistry):
     def __init__(self, workspace, bridge, checks, token):
         super().__init__()
         self.workspace, self.bridge, self.token = workspace, bridge, token
+        from agent.adapters.check_output import CheckOutputStore, register_output_reader
+        outputs = CheckOutputStore()
         for tool in workspace_tools(workspace).specifications():
             def handler(_name=tool.name, **args):
                 # Apply the same Python path guard before the independently validated editor callback.
@@ -108,8 +110,10 @@ class EditorTools(ToolRegistry):
                                           _config.get('outputLimit', 65536), check=_profile,
                                           cancellation=self.token).as_tool()
                 self.bridge('editor/checkResult', {'profile': _profile, 'result': json.loads(result.content)})
-                return result
+                return outputs.present(result)
             self.register(spec(PROFILES[profile], 'Run the configured check after editor permission and save checks.', {}), run)
+        if checks:
+            register_output_reader(self, outputs)
 
 
 class Server:
@@ -167,7 +171,8 @@ class Server:
 
     def initialize(self, params):
         allowed = {'protocolVersion', 'workspace', 'provider', 'model', 'baseUrl', 'apiKey', 'checks',
-                   'maxSteps', 'maxContextChars', 'checkpoint', 'sessionId', 'persistSession', 'requestTimeout', 'maxOutputTokens'}
+                   'maxSteps', 'maxContextChars', 'checkpoint', 'sessionId', 'persistSession', 'requestTimeout', 'maxOutputTokens',
+                   'contextMode', 'maxContextTokens', 'maxRunTokens'}
         if set(params) - allowed or type(params.get('protocolVersion')) is not int or params.get('protocolVersion') != PROTOCOL_VERSION:
             raise ValueError('Incompatible protocol or configuration.')
         if params.get('provider') not in {'demo', 'openai', 'ollama', 'openai-compatible'}:
@@ -187,6 +192,11 @@ class Server:
         for key, default in (('maxSteps', 15), ('maxContextChars', 200000)):
             if type(params.get(key, default)) is not int or params.get(key, default) < 1:
                 raise ValueError('Invalid budget.')
+        for key in ('maxContextTokens', 'maxRunTokens'):
+            if key in params and (type(params[key]) is not int or params[key] < 1):
+                raise ValueError('Invalid token budget.')
+        if params.get('contextMode', 'recent') not in {'recent', 'compact', 'full'}:
+            raise ValueError('Invalid context mode.')
         state = restore_state(params['checkpoint']) if 'checkpoint' in params else ConversationState()
         timeout = params.get('requestTimeout', 120)
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
@@ -212,12 +222,18 @@ class Server:
         if not isinstance(instructions, str) or len(instructions) > 100000:
             raise ValueError('Invalid project instructions.')
         model = self.meter(self.provider_factory(self.config), 'agent')
+        from agent.adapters.tokens import ModelTokenEstimator
+        from agent.core.context import RuleBasedContextBuilder
         tools = EditorTools(self.workspace, self.editor, self.config.get('checks', {}), self.token)
         verified = VerifiedTools(tools, lambda: workspace_fingerprint(self.workspace),
                                  configuration=self.config.get('checks', {}), records=self.verification_records)
         result = Agent(model, verified, self, mode=params['mode'], project_instructions=instructions,
                        max_steps=self.config.get('maxSteps', 15),
                        max_context_chars=self.config.get('maxContextChars', 200000), cancellation=self.token,
+                       context_builder=RuleBasedContextBuilder(self.config.get('contextMode', 'recent')),
+                       max_context_tokens=self.config.get('maxContextTokens'), max_run_tokens=self.config.get('maxRunTokens'),
+                       output_token_reserve=self.config.get('maxOutputTokens', 4096),
+                       token_estimator=ModelTokenEstimator(self.config['provider'], self.config.get('model', '')),
                        verification=verified).run(
                            params['task'], self.state)
         self.token.check()
@@ -337,7 +353,12 @@ class Server:
                         self.send({'id': request_id, 'error': {'code': -32800, 'message': 'Run cancelled; accepted edits may remain.'}})
                     except Exception as exc:
                         # Never serialize raw provider exceptions: they may contain credentials or request bodies.
-                        self.send({'id': request_id, 'error': {'code': -32000, 'message': f'Agent operation failed ({type(exc).__name__}).'}})
+                        message = ('Run token budget reached before another request. Inspect existing changes or increase maxRunTokens.'
+                                   if isinstance(exc, TokenBudgetError) else
+                                   'Context budget exceeded. Reduce input or review context limits and the output reserve.'
+                                   if isinstance(exc, ContextLimitError) else
+                                   f'Agent operation failed ({type(exc).__name__}).')
+                        self.send({'id': request_id, 'error': {'code': -32000, 'message': message}})
                 self.worker = threading.Thread(target=work, daemon=True)
                 self.worker.start()
                 return

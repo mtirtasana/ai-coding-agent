@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — token consumption
+
+- Scoped VS Code replacement diffs; concise retrievable test/lint output, preserving scanner findings.
+- Opt-in `compact` history projections, optional context/run token guards, output reserves and separately labeled estimates.
+- Optional OpenAI model tokenizer with a conservative provider-independent fallback.
+- Shared inline inference, short-lived exact-context reuse and cancellation of unused local completion workers.
+- Evaluation context-mode selection, regression coverage and ADR-0024.
+
 ## 0.12.0 backend / 0.4.0 extension — internal release candidate
 
 - CLI file review is the default with write permission. Trusted automation must

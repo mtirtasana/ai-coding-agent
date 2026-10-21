@@ -40,6 +40,11 @@ const usageTokens = (group: { tokens: Record<string, { reported_sum: number | nu
     const count = group.tokens[key];
     return `${key}: ${count.reported_sum ?? "unknown"} (${count.responses_with_value}/${group.responses} responses)`;
   }).join(" · ");
+const showCompletionStats = (stats: { requested: number; reused: number; discarded: number } | undefined) => {
+  const container = element("completion-stats");
+  if (container && stats) container.textContent =
+    `Inline this workspace: ${stats.requested} requests · ${stats.reused} reused · ${stats.discarded} discarded/cancelled results`;
+};
 window.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || typeof data !== "object") return;
@@ -47,6 +52,7 @@ window.addEventListener("message", (event) => {
     element("progress").textContent = String(data.text);
     return;
   }
+  if (data.type === "completionStats") { showCompletionStats(data.stats); return; }
   if (data.type === "usage") {
     const container = element("usage-report");
     if (!container) return;
@@ -75,6 +81,7 @@ window.addEventListener("message", (event) => {
     return;
   }
   if (data.type !== "state") return;
+  showCompletionStats(data.completionStats);
   if (data.usageSession !== usageSession) {
     usageSession = data.usageSession;
     const report = element("usage-report");

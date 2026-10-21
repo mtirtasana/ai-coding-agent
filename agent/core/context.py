@@ -1,5 +1,6 @@
 """Deterministic projections of history; never truncate messages or mutate sources."""
 import json
+from dataclasses import replace
 from collections.abc import Sequence
 
 from .types import ContextSelection, ContextStats, Message, ToolSpec
@@ -66,8 +67,8 @@ def split_turns(messages: Sequence[Message]):
 
 class RuleBasedContextBuilder:
     def __init__(self, mode: str = "recent"):
-        if mode not in {"recent", "full"}:
-            raise ValueError("Kontextmodus muss recent oder full sein.")
+        if mode not in {"recent", "full", "compact"}:
+            raise ValueError("Kontextmodus muss recent, compact oder full sein.")
         self.mode = mode
 
     def build(self, messages: Sequence[Message], tools: Sequence[ToolSpec],
@@ -76,6 +77,36 @@ class RuleBasedContextBuilder:
             raise ValueError("Kontextbudget muss positiv sein.")
         fixed_count, turns = split_turns(messages)
         full_chars = context_chars(messages, tools)
+        if self.mode == 'compact':
+            # Projection only: original history, calls and the newest two rounds
+            # remain intact. Never summarize arbitrary source text as instructions.
+            rounds = [group for _, groups in turns for group in groups]
+            projected = list(messages)
+            for group in rounds[:-2]:
+                calls = {call.id: call for call in messages[group[0]].tool_calls}
+                for index in group[1:]:
+                    message = messages[index]
+                    call = calls.get(message.call_id)
+                    if call is None or call.name not in {'file_snapshot', 'read_file_range'}:
+                        continue
+                    try:
+                        envelope = json.loads(message.content)
+                        data = json.loads(envelope['content'])
+                        if (envelope.get('ok') is not True or not isinstance(data, dict) or
+                                not isinstance(data.get('content'), str) or len(data['content']) < 4000 or
+                                not isinstance(data.get('path'), str) or not isinstance(data.get('sha256'), str)):
+                            continue
+                        reference = {key: data[key] for key in ('path', 'sha256', 'start_line', 'end_line',
+                                     'total_lines', 'documentVersion') if key in data}
+                        reference.update(content_omitted=True,
+                                         note='Historical read reference, not current source. Read the relevant range again before relying on omitted details or editing. This hash may be stale.')
+                        content = json.dumps({'ok': True, 'content': json.dumps(reference, ensure_ascii=False)},
+                                             ensure_ascii=False)
+                        if len(content) < len(message.content):
+                            projected[index] = replace(message, content=content)
+                    except (ValueError, TypeError, KeyError):
+                        continue
+            messages = projected
         if self.mode == "full":
             if full_chars > max_chars:
                 raise ContextLimitError("Vollständiger Kontext überschreitet das Zeichenbudget.")

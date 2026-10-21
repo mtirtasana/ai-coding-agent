@@ -60,6 +60,8 @@ class RequestMetrics:
     step: int
     context: ContextStats
     usage: ModelUsage | None
+    estimated_input_tokens: int | None = None
+    token_estimate_method: str | None = None
 
 
 @dataclass(frozen=True)

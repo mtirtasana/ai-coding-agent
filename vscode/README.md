@@ -1,5 +1,10 @@
 # Generic Coding Agent for VS Code
 
+Token controls: `genericAgent.contextMode` (`recent`, opt-in `compact`, `full`),
+`genericAgent.maxContextTokens` and `genericAgent.maxRunTokens` (zero disables).
+See [token efficiency](../docs/token-efficiency.md) for reserve semantics,
+retrievable check output, inline reuse and accuracy limits.
+
 An independent sidebar for the Python coding agent, with planning, individually
 reviewed edits, configured checks, opt-in inline suggestions and existing editor
 diagnostics. Supports desktop VS Code 1.95+ and workspace-host execution in SSH,

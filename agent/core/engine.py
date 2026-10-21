@@ -3,9 +3,10 @@ from dataclasses import asdict
 
 from .cancellation import CancellationToken
 from .context import ContextLimitError, RuleBasedContextBuilder
-from .ports import ContextBuilder, EventSink, ModelProvider, ToolExecutor
+from .ports import ContextBuilder, EventSink, ModelProvider, ToolExecutor, TokenEstimator
 from .policy import MODE_INSTRUCTIONS, ModeToolExecutor
 from .types import ConversationState, Message, RequestMetrics, RunResult
+from .tokens import ByteTokenEstimator
 
 
 INSTRUCTIONS = (
@@ -44,13 +45,19 @@ class OutputLimitError(RuntimeError):
     pass
 
 
+class TokenBudgetError(RuntimeError):
+    pass
+
+
 class Agent:
     def __init__(self, model: ModelProvider, tools: ToolExecutor,
                  events: EventSink | None = None, max_steps: int = 15,
                  max_context_chars: int = 200_000,
                  context_builder: ContextBuilder | None = None,
                  mode: str = "implement", project_instructions: str = "",
-                 cancellation: CancellationToken | None = None, verification=None):
+                 cancellation: CancellationToken | None = None, verification=None,
+                 max_context_tokens: int | None = None, max_run_tokens: int | None = None,
+                 output_token_reserve: int = 4096, token_estimator: TokenEstimator | None = None):
         if max_steps < 1 or max_context_chars < 1:
             raise ValueError("Schritt- und Kontextlimit müssen positiv sein.")
         self.cancellation = cancellation or CancellationToken()
@@ -59,6 +66,13 @@ class Agent:
         self.verification = verification
         self.max_steps, self.max_context_chars = max_steps, max_context_chars
         self.context_builder = context_builder if context_builder is not None else RuleBasedContextBuilder()
+        if (type(output_token_reserve) is not int or output_token_reserve < 1 or
+                any(value is not None and (type(value) is not int or value < 1)
+                    for value in (max_context_tokens, max_run_tokens))):
+            raise ValueError('Token budgets and output reserve must be positive integers.')
+        self.max_context_tokens, self.max_run_tokens = max_context_tokens, max_run_tokens
+        self.output_token_reserve = output_token_reserve
+        self.token_estimator = token_estimator or ByteTokenEstimator()
 
     def emit(self, kind, **data):
         if self.events is not None:
@@ -89,16 +103,41 @@ class Agent:
             messages.extend(state.messages)
         messages.append(Message("user", task))
         requests = []
+        consumed_tokens = 0
         self.emit("run_started", max_steps=self.max_steps, mode=self.mode)
         for step in range(1, self.max_steps + 1):
             self.cancellation.check()
             try:
                 selection = self.context_builder.build(tuple(messages), specs, self.max_context_chars)
+                estimate = self.token_estimator.estimate(selection.messages, specs)
+                if self.max_context_tokens is not None:
+                    available = self.max_context_tokens - self.output_token_reserve
+                    while estimate.tokens > available:
+                        # Drop the oldest retained optional unit, then re-estimate.
+                        # Scaling characters by tokens can discard a mandatory
+                        # low-token round because an older Unicode result is dense.
+                        budget = selection.stats.selected_chars - 1
+                        if budget < 1:
+                            raise ContextLimitError('Token context budget cannot fit mandatory context and output reserve.')
+                        selection = self.context_builder.build(tuple(messages), specs, budget)
+                        estimate = self.token_estimator.estimate(selection.messages, specs)
             except ContextLimitError:
                 self.emit("run_stopped", reason="context_limit")
                 raise
+            if (self.max_run_tokens is not None and
+                    consumed_tokens + estimate.tokens + self.output_token_reserve > self.max_run_tokens):
+                self.emit('run_stopped', reason='token_budget')
+                raise TokenBudgetError('Run token budget cannot fit another request and output reserve.')
             self.emit("context_selected", step=step, **asdict(selection.stats))
+            self.emit('token_estimated', step=step, estimated_input_tokens=estimate.tokens,
+                      method=estimate.method, consumed_run_tokens=consumed_tokens,
+                      output_reserve=self.output_token_reserve)
             model_response = self.model.generate(selection.messages, specs)
+            usage = model_response.usage
+            consumed_tokens += ((usage.input_tokens if usage is not None and usage.input_tokens is not None
+                                 else estimate.tokens) +
+                                (usage.output_tokens if usage is not None and usage.output_tokens is not None
+                                 else self.output_token_reserve))
             self.emit("model_completed", step=step, tool_calls=len(model_response.message.tool_calls),
                       usage=asdict(model_response.usage) if model_response.usage is not None else None)
             self.cancellation.check()
@@ -111,7 +150,8 @@ class Agent:
             if len(ids) != len(set(ids)):
                 raise ValueError("Doppelte Werkzeugaufruf-ID.")
             messages.append(response)
-            requests.append(RequestMetrics(step, selection.stats, model_response.usage))
+            requests.append(RequestMetrics(step, selection.stats, model_response.usage,
+                                           estimate.tokens, estimate.method))
             if not response.tool_calls:
                 evidence = [] if self.verification is None else list(self.verification.evidence())
                 if self.verification is not None:

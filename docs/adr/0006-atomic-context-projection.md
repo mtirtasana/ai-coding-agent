@@ -4,6 +4,7 @@
 - Recorded: 2026-10-20
 - Scope: model request context
 - Supersedes: none
+- Partially superseded by: [ADR-0024](0024-token-efficient-context.md) for optional compaction and token guards; `recent` remains the default.
 
 ## Context
 

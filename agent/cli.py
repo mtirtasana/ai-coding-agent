@@ -75,8 +75,10 @@ def main():
                         help="Environment variable holding the compatible endpoint API key")
     parser.add_argument("--max-steps", type=int, default=15)
     parser.add_argument("--max-context-chars", type=int, default=200_000)
-    parser.add_argument("--context-mode", choices=["recent", "full"], default="recent",
-                        help="recent: neueste vollständige Runden; full: gesamte Historie")
+    parser.add_argument("--context-mode", choices=["recent", "compact", "full"], default="recent",
+                        help="recent: complete recent rounds; compact: also replace old large file reads with references; full: all history")
+    parser.add_argument('--max-context-tokens', type=int, help='Estimated input plus output reserve per request; optional')
+    parser.add_argument('--max-run-tokens', type=int, help='Cumulative run budget with estimated preflight checks; optional')
     parser.add_argument("--allow-write", action="store_true")
     review = parser.add_mutually_exclusive_group()
     review.add_argument('--review-edits', dest='review_edits', action='store_true', default=None, help='Review file edits (default with --allow-write)')
@@ -154,6 +156,8 @@ def main():
         return
     if args.max_steps < 1 or args.max_context_chars < 1:
         parser.error("Schritt- und Kontextlimit müssen positiv sein.")
+    if any(value is not None and value < 1 for value in (args.max_context_tokens, args.max_run_tokens)):
+        parser.error('Token budgets must be positive.')
     import math
     if not math.isfinite(args.request_timeout) or args.request_timeout <= 0 or not 1 <= args.max_output_tokens <= 100000:
         parser.error('Request timeout must be positive/finite; output limit must be 1–100000 tokens.')
@@ -242,6 +246,7 @@ def main():
             if hasattr(model, 'client') and hasattr(model.client, 'with_options'):
                 model.client = model.client.with_options(timeout=args.request_timeout, max_retries=0)
             active = connections.current
+            from agent.adapters.tokens import ModelTokenEstimator
             metered = MeteredProvider(model, journal, identity.id, provider_name=active.provider,
                                       model=active.model, profile=active.profile)
             tools = workspace_tools(workspace, test_runner=runner,
@@ -259,6 +264,9 @@ def main():
                          EventFanout(observer, JsonlEventSink(sys.stderr) if args.verbose else None),
                          max_steps=args.max_steps, max_context_chars=args.max_context_chars,
                          context_builder=RuleBasedContextBuilder(args.context_mode),
+                         max_context_tokens=args.max_context_tokens, max_run_tokens=args.max_run_tokens,
+                         output_token_reserve=args.max_output_tokens,
+                         token_estimator=ModelTokenEstimator(active.provider, active.model),
                          mode=current_mode, project_instructions=rules, verification=verified)
 
         if session is not None:

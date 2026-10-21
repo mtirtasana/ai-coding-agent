@@ -223,6 +223,31 @@
           "maximum": 100000,
           "default": 4096,
           "scope": "resource"
+        },
+        "genericAgent.contextMode": {
+          "type": "string",
+          "enum": [
+            "recent",
+            "compact",
+            "full"
+          ],
+          "default": "recent",
+          "scope": "resource",
+          "description": "Compact is opt-in: replace old large file reads with historical references; preserve the latest two rounds."
+        },
+        "genericAgent.maxContextTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "scope": "resource",
+          "description": "Estimated total context per request including the output reserve. 0 disables this additional guard; character limits still apply."
+        },
+        "genericAgent.maxRunTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "scope": "resource",
+          "description": "Per-task cumulative token guard using conservative input estimates and the output limit for preflight. 0 disables. This is not a billing guarantee."
         }
       }
     }

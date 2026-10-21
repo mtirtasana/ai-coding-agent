@@ -7,6 +7,7 @@ import { Runtime } from "./runtime";
 import { RpcClient, RecordValue } from "./rpc";
 import {
   completionContext,
+  CompletionCache,
   providerKey,
   relativePath,
   sameStamp,
@@ -28,6 +29,7 @@ interface Session {
   tools: EditorTools;
   client?: RpcClient;
   completion?: RpcClient;
+  completionInitializing?: Promise<RpcClient>;
   checkpoint?: RecordValue;
   instructions?: string;
   mode: "plan" | "implement";
@@ -39,7 +41,7 @@ interface Session {
   permissions: Set<string>;
   messages: { role: string; text: string }[];
   checks: { profile: string; result: unknown }[];
-  inlineBusy: boolean;
+  completionCache: CompletionCache;
 }
 export class Controller
   implements vscode.WebviewViewProvider, vscode.Disposable
@@ -92,13 +94,21 @@ export class Controller
         permissions: new Set(),
         messages: [],
         checks: [],
-        inlineBusy: false,
+        completionCache: new CompletionCache(),
       };
       this.sessions.set(id, session);
     }
     return session;
   }
   private async initialize(session: Session, completion = false) {
+    if (!completion) return this.startClient(session, false);
+    if (session.completionInitializing) return session.completionInitializing;
+    const pending = this.startClient(session, true);
+    session.completionInitializing = pending;
+    try { return await pending; }
+    finally { if (session.completionInitializing === pending) session.completionInitializing = undefined; }
+  }
+  private async startClient(session: Session, completion = false) {
     this.trusted();
     const generation = session.generation;
     const existing = completion ? session.completion : session.client;
@@ -192,10 +202,15 @@ export class Controller
         checks: completion ? {} : validateChecks(cfg.get("checks", {})),
         maxSteps: cfg.get("maxSteps", 15),
         maxContextChars: cfg.get("maxContextChars", 200000),
+        contextMode: cfg.get("contextMode", "recent"),
         requestTimeout: cfg.get("requestTimeout", 120),
         maxOutputTokens: cfg.get("maxOutputTokens", 4096),
         persistSession: !completion && cfg.get("persistSession", false),
       };
+      for (const setting of ["maxContextTokens", "maxRunTokens"]) {
+        const value = cfg.get<number>(setting, 0);
+        if (value) config[setting] = value;
+      }
       if (["openai", "openai-compatible"].includes(provider) && !key)
         throw Error("Use Configure Provider to set an API key.");
       if (key) config.apiKey = key;
@@ -318,7 +333,7 @@ export class Controller
     const css = view.webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, "media/style.css"),
     );
-    view.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${css}"></head><body><header><h2>Coding Agent</h2><select id="folder" aria-label="Workspace folder"></select><p id="status"></p></header><nav><button data-action="setup">Set up backend</button><button data-action="configure">Provider</button><button data-action="plan">Plan</button><button data-action="acceptPlan">Accept plan</button><button data-action="new">New</button><button data-action="inline">Automatic completions</button></nav><main><section id="messages" aria-live="polite"></section><section><h3>Changes to review</h3><div id="proposals"></div></section><section><h3>Checks</h3><div id="checks"></div></section><section aria-label="Recorded token usage"><h3>Token usage</h3><label>Period <select id="usage-period"><option value="session">This conversation</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="7d">Last 7 days (rolling)</option><option value="30d">Last 30 days (rolling)</option><option value="all">All recorded usage</option><option value="custom">Custom dates</option></select></label><label>From <input id="usage-start" type="date"></label><label>To (inclusive) <input id="usage-end" type="date"></label><label>Interface <select id="usage-interface"><option value="">All</option><option value="cli">CLI</option><option value="vscode">VS Code</option></select></label><label>Category <select id="usage-kind"><option value="">All</option><option value="agent">Agent</option><option value="completion">Completion</option></select></label><label>Provider <input id="usage-provider" maxlength="256"></label><label>Profile <input id="usage-profile" maxlength="256"></label><label>Model <input id="usage-model" maxlength="256"></label><button id="usage-refresh" type="button">Refresh usage</button><p>Filters apply on Refresh. Reports use this execution host’s local timezone.</p><div id="usage-report" aria-live="polite">Refresh to view recorded usage.</div></section><section><h3>Editor diagnostics</h3><div id="diagnostics"></div></section></main><form id="form"><label for="task">Task</label><textarea id="task" rows="4" maxlength="100000"></textarea><p id="attachments"></p><button data-action="attach" type="button">Attach selection</button><button id="send" type="submit">Send</button><button data-action="stop" type="button">Stop</button></form><p id="progress" role="status"></p><script nonce="${nonce}" src="${js}"></script></body></html>`;
+    view.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${css}"></head><body><header><h2>Coding Agent</h2><select id="folder" aria-label="Workspace folder"></select><p id="status"></p></header><nav><button data-action="setup">Set up backend</button><button data-action="configure">Provider</button><button data-action="plan">Plan</button><button data-action="acceptPlan">Accept plan</button><button data-action="new">New</button><button data-action="inline">Automatic completions</button></nav><main><section id="messages" aria-live="polite"></section><section><h3>Changes to review</h3><div id="proposals"></div></section><section><h3>Checks</h3><div id="checks"></div></section><section aria-label="Recorded token usage"><h3>Token usage</h3><label>Period <select id="usage-period"><option value="session">This conversation</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="7d">Last 7 days (rolling)</option><option value="30d">Last 30 days (rolling)</option><option value="all">All recorded usage</option><option value="custom">Custom dates</option></select></label><label>From <input id="usage-start" type="date"></label><label>To (inclusive) <input id="usage-end" type="date"></label><label>Interface <select id="usage-interface"><option value="">All</option><option value="cli">CLI</option><option value="vscode">VS Code</option></select></label><label>Category <select id="usage-kind"><option value="">All</option><option value="agent">Agent</option><option value="completion">Completion</option></select></label><label>Provider <input id="usage-provider" maxlength="256"></label><label>Profile <input id="usage-profile" maxlength="256"></label><label>Model <input id="usage-model" maxlength="256"></label><button id="usage-refresh" type="button">Refresh usage</button><p>Filters apply on Refresh. Reports use this execution host’s local timezone.</p><p id="completion-stats"></p><div id="usage-report" aria-live="polite">Refresh to view recorded usage.</div></section><section><h3>Editor diagnostics</h3><div id="diagnostics"></div></section></main><form id="form"><label for="task">Task</label><textarea id="task" rows="4" maxlength="100000"></textarea><p id="attachments"></p><button data-action="attach" type="button">Attach selection</button><button id="send" type="submit">Send</button><button data-action="stop" type="button">Stop</button></form><p id="progress" role="status"></p><script nonce="${nonce}" src="${js}"></script></body></html>`;
     this.context.subscriptions.push(
       view.webview.onDidReceiveMessage((message: unknown) => {
         void this.action(message).catch((e) => this.error(e));
@@ -467,7 +482,8 @@ export class Controller
         if (session.generation !== generation) return;
         session.instructions = instructions;
         session.client?.dispose();
-        session.completion?.dispose();
+        session.completionCache.clear();
+    session.completion?.dispose();
         session.client = session.completion = undefined;
         session.checkpoint = undefined;
         session.usageId = randomUUID();
@@ -609,6 +625,7 @@ export class Controller
         if (timer) clearTimeout(timer);
       }
     }
+    session.completionCache.clear();
     session.completion?.dispose();
     session.completion = undefined;
     session.cancelling = false;
@@ -686,6 +703,7 @@ export class Controller
       await cfg.update(key, value, vscode.ConfigurationTarget.WorkspaceFolder);
     for (const s of this.sessions.values()) {
       s.client?.dispose();
+      s.completionCache.clear();
       s.completion?.dispose();
       s.permissions.clear();
       s.client = s.completion = undefined;
@@ -756,34 +774,35 @@ export class Controller
     await new Promise((resolve) => setTimeout(resolve, 500));
     if (
       token.isCancellationRequested ||
-      document.version !== stamp.version ||
-      session.inlineBusy
+      document.version !== stamp.version
     )
       return [];
-    session.inlineBusy = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await session.tools.guarded(
         path.relative(folder.uri.fsPath, document.uri.fsPath),
       );
-      const client = await this.initialize(session, true);
-      if (token.isCancellationRequested || document.version !== stamp.version)
-        return [];
-      const request = client.request("completion/generate", {
-        ...completionContext(document.getText(), stamp.offset),
-        language: document.languageId,
+      if (token.isCancellationRequested || document.version !== stamp.version) return [];
+      const generation = session.generation;
+      const params = { ...completionContext(document.getText(), stamp.offset), language: document.languageId };
+      const key = sha(JSON.stringify([generation, stamp, params, cfg.get("provider"), cfg.get("model"), cfg.get("baseUrl"), cfg.get("inline.model")]));
+      const text = await session.completionCache.get(key, token, () => {
+        let client: RpcClient | undefined;
+        let cancelled = false;
+        const cancel = () => { cancelled = true; client?.dispose(); };
+        const result = (async () => {
+          client = await this.initialize(session, true);
+          if (cancelled || generation !== session.generation || document.version !== stamp.version) return "";
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const reply = record(await Promise.race([
+              client.request("completion/generate", params),
+              new Promise((_, reject) => { timer = setTimeout(() => { cancel(); reject(Error("Completion timed out.")); }, 5000); }),
+            ]));
+            return typeof reply.text === "string" ? reply.text : "";
+          } finally { if (timer) clearTimeout(timer); }
+        })();
+        return { result, cancel };
       });
-      const result = record(
-        await Promise.race([
-          request,
-          new Promise((_, reject) => {
-            timer = setTimeout(() => {
-              client.dispose();
-              reject(Error("Completion timed out."));
-            }, 5000);
-          }),
-        ]),
-      );
       const editor = vscode.window.activeTextEditor;
       const now = {
         uri: editor?.document.uri.toString() || "",
@@ -793,21 +812,22 @@ export class Controller
       if (
         token.isCancellationRequested ||
         !sameStamp(stamp, now) ||
-        typeof result.text !== "string" ||
-        !result.text
+        typeof text !== "string" ||
+        !text || generation !== session.generation
       )
-        return [];
+        { if (!token.isCancellationRequested && text) session.completionCache.stats.discarded++; return []; }
       return [
         new vscode.InlineCompletionItem(
-          result.text.slice(0, 2000),
+          text.slice(0, 2000),
           new vscode.Range(position, position),
         ),
       ];
     } catch {
       return [];
     } finally {
-      if (timer) clearTimeout(timer);
-      session.inlineBusy = false;
+      if (this.selected === session) void this.view?.webview.postMessage({
+        type: "completionStats", stats: session.completionCache.stats,
+      });
     }
   }
   content(uri: vscode.Uri) {
@@ -933,6 +953,7 @@ export class Controller
       diagnostics: this.diagnosticItems(),
       attachmentCount: this.attachments.length,
       usageSession: session?.usageId,
+      completionStats: session?.completionCache.stats,
     });
   }
   invalidateVerification() {
@@ -995,7 +1016,8 @@ export class Controller
     const instructions = await this.loadInstructions(session);
     const result = record(await this.metadata("session/resumeSaved", { ...params, sessionId: choice.id }));
     await this.stop();
-    session.client?.dispose(); session.completion?.dispose();
+    session.client?.dispose(); session.completionCache.clear();
+    session.completion?.dispose();
     session.client = session.completion = undefined;
     session.checkpoint = record(result.checkpoint);
     session.instructions = instructions;
@@ -1032,6 +1054,7 @@ export class Controller
     await this.stopAll();
     for (const s of this.sessions.values()) {
       s.client?.dispose();
+      s.completionCache.clear();
       s.completion?.dispose();
       s.client = s.completion = undefined;
       s.permissions.clear();
@@ -1059,6 +1082,7 @@ export class Controller
           () => s.client?.dispose(),
           () => s.client?.dispose(),
         );
+      s.completionCache.clear();
       s.completion?.dispose();
     }
   }
@@ -1130,6 +1154,7 @@ export function activate(context: vscode.ExtensionContext) {
           "checks",
           "maxSteps",
           "maxContextChars",
+          "contextMode", "maxContextTokens", "maxRunTokens",
           "inline.model",
           "requestTimeout", "maxOutputTokens", "persistSession",
         ].some((k) => e.affectsConfiguration("genericAgent." + k))

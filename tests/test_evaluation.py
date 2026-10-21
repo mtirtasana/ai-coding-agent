@@ -123,6 +123,19 @@ class ReadFixtureModel:
 class EvaluationTests(unittest.TestCase):
     profile = {'provider': 'openai', 'model': 'simulated', 'name': 'unit-test-double'}
 
+    def test_compact_context_preserves_scripted_repairs_and_independent_verification(self):
+        rows = {}
+        for mode in ('recent', 'compact'):
+            rows[mode] = evaluate_profile(self.profile, live=True, allow_exec=True,
+                                         model_factory=lambda profile: ReadFixtureModel(),
+                                         suite='read_comparison', read_strategy='full', context_mode=mode)
+            self.assertTrue(all(row['status'] == 'passed' for row in rows[mode]), rows[mode])
+            self.assertTrue(all(row['usage']['input_tokens']['reported_sum'] is None for row in rows[mode]))
+        before = sum(row['selected_context_chars'] for row in rows['recent'])
+        after = sum(row['selected_context_chars'] for row in rows['compact'])
+        self.assertLess(after, before)
+        print(f'\nScripted compact comparison (characters, NOT live tokens): recent={before}, compact={after}')
+
     def test_baseline_and_complete_edit_verify_workflow(self):
         for toolset in ['baseline', 'workflow']:
             models = []

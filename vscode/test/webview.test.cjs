@@ -9,6 +9,9 @@ test("webview renders model, diagnostic and check text without executing HTML", 
     { runScripts: "outside-only" },
   );
   const sent = [];
+  const completionStats = dom.window.document.createElement('p');
+  completionStats.id = 'completion-stats';
+  dom.window.document.body.append(completionStats);
   dom.window.acquireVsCodeApi = () => ({
     postMessage: (value) => sent.push(value),
   });
@@ -21,6 +24,7 @@ test("webview renders model, diagnostic and check text without executing HTML", 
     new dom.window.MessageEvent("message", {
       data: {
         type: "state",
+        completionStats: { requested: 3, reused: 2, discarded: 1 },
         trusted: true,
         mode: "plan",
         provider: "demo",
@@ -48,6 +52,7 @@ test("webview renders model, diagnostic and check text without executing HTML", 
   assert.equal(dom.window.document.querySelectorAll("img,script").length, 0);
   assert(dom.window.document.body.textContent.includes(attack));
   assert.equal(sent[0].type, "ready");
+  assert.match(completionStats.textContent, /3 requests · 2 reused · 1 discarded/);
   const document = dom.window.document;
   document.getElementById("usage-start").value = "2026-01-01";
   document.getElementById("usage-end").value = "2026-01-31";

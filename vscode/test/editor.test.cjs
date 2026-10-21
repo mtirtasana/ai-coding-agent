@@ -112,6 +112,22 @@ async function proposal(tools) {
   assert.equal(tools.proposals.size, 1);
   return [...tools.proposals.keys()][0];
 }
+test("preview uses a small unified diff from the dirty buffer without editing", async () =>
+  fixture(async (tools) => {
+    const doc = (await tools.read("a.py")).document;
+    doc.text = Array.from({ length: 1000 }, (_, i) => `value_${i} = ${i}\n`).join("");
+    doc.version++;
+    const before = doc.text;
+    const reply = await tools.execute("preview_edit", { path: "a.py", expected_sha256: sha(before),
+      old_text: "value_500 = 500", new_text: "value_500 = 501" }, "plan", () => true);
+    assert.equal(reply.ok, true, reply.content);
+    const preview = JSON.parse(reply.content);
+    assert(preview.diff.length < 400);
+    assert.equal(preview.diff_truncated, false);
+    assert.match(preview.diff, /-value_500 = 500\n\+value_500 = 501/);
+    assert.equal(doc.text, before);
+    assert.equal(tools.proposals.size, 0);
+  }));
 test("range reads use dirty buffers and full hashes; stale range edits and invalid arguments fail", async () =>
   fixture(async (tools, dir) => {
     const doc = (await tools.read("a.py")).document;

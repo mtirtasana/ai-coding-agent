@@ -14,6 +14,7 @@ from agent.adapters.instructions import load_project_instructions
 from agent.adapters.models import OpenAIProvider, OllamaProvider, OpenAICompatibleProvider
 from agent.adapters.tools import workspace_tools
 from agent.core.engine import Agent
+from agent.core.context import RuleBasedContextBuilder
 from agent.files import Workspace
 
 
@@ -174,7 +175,8 @@ def unchanged(root, originals, names=None):
 
 def evaluate_profile(profile, *, live=False, allow_exec=False, toolset='workflow',
                      max_steps=15, max_context_chars=200000, model_factory=None,
-                     read_strategy='ranges', suite='basic'):
+                     read_strategy='ranges', suite='basic', context_mode='recent'):
+    builder = RuleBasedContextBuilder(context_mode)
     if toolset not in {'baseline', 'workflow'}:
         raise ValueError('Invalid evaluation toolset.')
     if read_strategy not in {'full', 'ranges'} or suite not in {'basic', 'read_comparison'}:
@@ -187,7 +189,7 @@ def evaluate_profile(profile, *, live=False, allow_exec=False, toolset='workflow
         metrics = Metrics()
         row = {'provider': profile['provider'], 'name': profile.get('name', profile['provider']),
                'model': profile.get('model') or ('gpt-4.1' if profile['provider'] == 'openai' else None),
-               'toolset': toolset, 'read_strategy': read_strategy, 'suite': suite,
+               'toolset': toolset, 'read_strategy': read_strategy, 'suite': suite, 'context_mode': context_mode,
                'task': task, 'status': 'not_run', 'reason': None}
         started = time.monotonic()
         try:
@@ -206,7 +208,7 @@ def evaluate_profile(profile, *, live=False, allow_exec=False, toolset='workflow
                 agent = Agent(model, workspace_tools(workspace, enhanced=toolset == 'workflow', test_runner=runner,
                                                     range_reads=read_strategy == 'ranges'),
                               metrics, max_steps=max_steps, max_context_chars=max_context_chars,
-                              mode='plan' if task == 'explain' else 'implement',
+                              mode='plan' if task == 'explain' else 'implement', context_builder=builder,
                               project_instructions=load_project_instructions(workspace).content)
                 result = agent.run(prompt)
                 if task == 'explain':
@@ -260,6 +262,7 @@ def main():
                         help='Pair full/range workflow reads on large-file, multi-file and dependency-context fixtures')
     parser.add_argument('--max-steps', type=int, default=15)
     parser.add_argument('--max-context-chars', type=int, default=200000)
+    parser.add_argument('--context-mode', choices=['recent', 'compact', 'full'], default='recent')
     parser.add_argument('--output', type=Path, help='Write a metadata-only JSON report instead of stdout')
     args = parser.parse_args()
     if args.max_steps < 1 or args.max_context_chars < 1:
@@ -281,7 +284,8 @@ def main():
             if args.compare_reads:
                 paired = [evaluate_profile(profile, live=args.live, allow_exec=args.allow_exec,
                                            read_strategy=strategy, suite='read_comparison',
-                                           max_steps=args.max_steps, max_context_chars=args.max_context_chars)
+                                           max_steps=args.max_steps, max_context_chars=args.max_context_chars,
+                                           context_mode=args.context_mode)
                           for strategy in ('full', 'ranges')]
                 comparisons.extend(compare_read_results(*paired, offset=len(results)))
                 results.extend(paired[0] + paired[1])
@@ -289,7 +293,7 @@ def main():
             for toolset in (['baseline', 'workflow'] if args.toolset == 'both' else [args.toolset]):
                 results.extend(evaluate_profile(profile, live=args.live, allow_exec=args.allow_exec,
                                                 toolset=toolset, max_steps=args.max_steps,
-                                                max_context_chars=args.max_context_chars))
+                                                max_context_chars=args.max_context_chars, context_mode=args.context_mode))
         report = json.dumps({'report_version': 1, 'results': results, 'read_comparisons': comparisons}, indent=2)
         if args.output:
             args.output.write_text(report + '\n', encoding='utf-8')
