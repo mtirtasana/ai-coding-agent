@@ -62,6 +62,8 @@ class FileTools:
                         if (entry.name in SKIP_DIRS or entry.name.startswith('.env')
                                 or entry.is_symlink()):
                             continue
+                        if self.workspace.policy.ignored(current.relative_to(self.workspace.root) / entry.name, entry.is_dir()):
+                            continue
                         candidate = self.workspace.path(str(current.relative_to(self.workspace.root) / entry.name))
                         pending.append(candidate)
                 continue

@@ -11,11 +11,11 @@ def token_count(value):
 
 class OpenAIProvider:
     """OpenAI Responses API; SDK wird nur beim Erstellen dieses Adapters geladen."""
-    def __init__(self, model: str, client=None, *, timeout=None, max_output_tokens=None, api_key=None):
+    def __init__(self, model: str, client=None, *, timeout=120, max_output_tokens=4096, api_key=None):
         if client is None:
             from openai import OpenAI
             options = {} if api_key is None else {'api_key': api_key}
-            client = OpenAI(**options) if timeout is None else OpenAI(timeout=timeout, max_retries=0, **options)
+            client = OpenAI(timeout=timeout, max_retries=0, **options)
         self.client, self.model = client, model
         self.max_output_tokens = max_output_tokens
 
@@ -47,13 +47,13 @@ class OpenAIProvider:
                 input_tokens=token_count(getattr(raw_usage, "input_tokens", None)),
                 output_tokens=token_count(getattr(raw_usage, "output_tokens", None)),
                 cached_input_tokens=token_count(getattr(details, "cached_tokens", None)))
-        return ModelResponse(Message("assistant", response.output_text, calls), usage)
+        return ModelResponse(Message("assistant", response.output_text, calls), usage, getattr(response, 'status', None) == 'incomplete')
 
 
 class OllamaProvider:
     """Lokale Ollama Chat API mit Werkzeugaufrufen; nur Standardbibliothek."""
     def __init__(self, model: str, base_url: str = "http://localhost:11434",
-                 timeout: float = 120, *, max_output_tokens=None):
+                 timeout: float = 120, *, max_output_tokens=4096):
         from urllib.parse import urlsplit
         url = urlsplit(base_url)
         if (url.scheme not in {"http", "https"} or not url.hostname
@@ -92,7 +92,10 @@ class OllamaProvider:
         request = Request(self.base_url + "/api/chat", data=json.dumps(payload).encode(),
                           headers={"Content-Type": "application/json"})
         with build_opener(NoRedirect()).open(request, timeout=self.timeout) as response:
-            payload = json.load(response)
+            raw = response.read(4 * 1024 * 1024 + 1)
+            if len(raw) > 4 * 1024 * 1024:
+                raise ValueError('Provider response exceeds 4 MiB.')
+            payload = json.loads(raw)
         result = payload["message"]
         # Selected history can have the same length in successive requests.
         response_id = uuid4().hex
@@ -103,12 +106,12 @@ class OllamaProvider:
         output_tokens = token_count(payload.get("eval_count"))
         usage = (None if input_tokens is None and output_tokens is None else
                  ModelUsage(input_tokens=input_tokens, output_tokens=output_tokens))
-        return ModelResponse(Message("assistant", result.get("content") or "", calls), usage)
+        return ModelResponse(Message("assistant", result.get("content") or "", calls), usage, payload.get('done_reason') == 'length')
 
 
 class OpenAICompatibleProvider:
     """Chat Completions with tool calling; no Responses fallback or SDK retries."""
-    def __init__(self, model: str, base_url: str, api_key: str, client=None, *, timeout=120, max_output_tokens=None):
+    def __init__(self, model: str, base_url: str, api_key: str, client=None, *, timeout=120, max_output_tokens=4096):
         from urllib.parse import urlsplit
         url = urlsplit(base_url)
         if (url.scheme not in {"http", "https"} or not url.hostname
@@ -151,7 +154,7 @@ class OpenAICompatibleProvider:
             usage = ModelUsage(token_count(getattr(raw, "prompt_tokens", None)),
                                token_count(getattr(raw, "completion_tokens", None)),
                                token_count(getattr(details, "cached_tokens", None)))
-        return ModelResponse(Message("assistant", result.content or "", calls), usage)
+        return ModelResponse(Message("assistant", result.content or "", calls), usage, getattr(response.choices[0], 'finish_reason', None) == 'length')
 
 
 class DemoProvider:

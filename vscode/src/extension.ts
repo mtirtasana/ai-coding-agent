@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
+import * as fs from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
 import { EditorTools } from "./editor";
 import { Runtime } from "./runtime";
@@ -20,6 +21,8 @@ const record = (value: unknown): RecordValue => {
 };
 interface Session {
   usageId: string;
+  revision: number;
+  checkRevisions: Map<string, number>;
   connectionSignature?: string;
   folder: vscode.WorkspaceFolder;
   tools: EditorTools;
@@ -77,6 +80,8 @@ export class Controller
       const tools = new EditorTools(folder, () => this.publish());
       session = {
         usageId: randomUUID(),
+        revision: 0,
+        checkRevisions: new Map(),
         folder,
         tools,
         mode: "plan",
@@ -130,8 +135,21 @@ export class Controller
         return this.bridge(session, method, params, current);
       },
       (params) => {
-        if (params.kind === "usage_warning") {
-          this.usageStorageIncomplete = true;
+        if (!completion && session.client === client && params.kind === "verification") {
+          const data = record(params.data);
+          if (Array.isArray(data.results)) {
+            for (const value of data.results) {
+              const item = record(value);
+              if (item.status === "passed" && session.checkRevisions.get(String(item.profile)) !== session.revision) item.status = "stale";
+              session.checks = session.checks.filter(check => check.profile !== item.profile);
+              session.checks.push({ profile: String(item.profile), result: { status: item.status, passed: item.status === "passed" } });
+            }
+            this.publish();
+          }
+          return;
+        }
+        if (params.kind === "usage_warning" || params.kind === "recovery_warning") {
+          if (params.kind === "usage_warning") this.usageStorageIncomplete = true;
           const data = record(params.data);
           if (typeof data.message === "string")
             void this.view?.webview.postMessage({ type: "progress", text: data.message });
@@ -166,7 +184,7 @@ export class Controller
         "";
       const config: RecordValue = {
         sessionId: session.usageId,
-        protocolVersion: 1,
+        protocolVersion: 2,
         workspace: session.folder.uri.fsPath,
         provider,
         model,
@@ -174,6 +192,9 @@ export class Controller
         checks: completion ? {} : validateChecks(cfg.get("checks", {})),
         maxSteps: cfg.get("maxSteps", 15),
         maxContextChars: cfg.get("maxContextChars", 200000),
+        requestTimeout: cfg.get("requestTimeout", 120),
+        maxOutputTokens: cfg.get("maxOutputTokens", 4096),
+        persistSession: !completion && cfg.get("persistSession", false),
       };
       if (["openai", "openai-compatible"].includes(provider) && !key)
         throw Error("Use Configure Provider to set an API key.");
@@ -183,7 +204,7 @@ export class Controller
       const reply = record(await client.request("initialize", config));
       if (session.generation !== generation)
         throw Error("Operation cancelled.");
-      if (reply.protocolVersion !== 1 || reply.backendVersion !== "0.11.0")
+      if (reply.protocolVersion !== 2 || reply.backendVersion !== "0.12.0")
         throw Error("Incompatible backend. Run backend setup again.");
       return client;
     } catch (e) {
@@ -261,12 +282,19 @@ export class Controller
           if (!current() || !(await doc.save())) return false;
         }
       }
-      return current();
+      if (current()) {
+        session.checkRevisions?.set(profile, session.revision);
+        return true;
+      }
+      return false;
     }
     if (method === "editor/checkResult") {
+      const checked = record(params.result);
+      if (checked.passed && session.checkRevisions?.get(String(params.profile)) !== session.revision)
+        Object.assign(checked, { passed: false, status: "stale" });
       session.checks.push({
         profile: String(params.profile),
-        result: params.result,
+        result: checked,
       });
       session.checks = session.checks.slice(-30);
       this.publish();
@@ -334,9 +362,10 @@ export class Controller
     let timer: ReturnType<typeof setTimeout> | undefined;
     let result: RecordValue;
     const usageClient = this.usageClient;
+    if (volatileCalls.length > 10000) this.usageStorageIncomplete = true;
     try {
       result = record(await Promise.race([
-        usageClient.request("usage/query", { ...query, volatileCalls }),
+        usageClient.request("usage/query", { ...query, volatileCalls: volatileCalls.slice(0, 10000) }),
         new Promise((_, reject) => { timer = setTimeout(() => { usageClient.dispose(); reject(Error("Usage query timed out. Refresh to retry.")); }, 5000); }),
       ]));
     } finally {
@@ -505,6 +534,14 @@ export class Controller
       );
       if (session.cancelled || session.generation !== generation) return;
       session.checkpoint = record(result.checkpoint);
+      if (Array.isArray(result.verification)) {
+        const evidence = result.verification.map(record);
+        for (const item of evidence) {
+          if (item.status === "passed" && session.checkRevisions.get(String(item.profile)) !== session.revision) item.status = "stale";
+          session.checks = session.checks.filter(check => check.profile !== item.profile);
+          session.checks.push({ profile: String(item.profile), result: { status: item.status, passed: item.status === "passed" } });
+        }
+      }
       session.messages.push({ role: "assistant", text: String(result.text) });
     } catch (e) {
       if (session.generation !== generation) return;
@@ -898,6 +935,79 @@ export class Controller
       usageSession: session?.usageId,
     });
   }
+  invalidateVerification() {
+    for (const session of this.sessions.values()) {
+      ++session.revision;
+      for (const check of session.checks) {
+        const result = record(check.result);
+        if (result.passed) check.result = { ...result, passed: false, status: "stale" };
+      }
+    }
+    this.publish();
+  }
+  private async metadata(method: string, params: RecordValue = {}) {
+    this.trusted();
+    if (!this.usageClient?.running) {
+      const python = await this.runtime.ready("demo");
+      this.usageClient = new RpcClient(python, this.context.globalStorageUri.fsPath,
+        async () => { throw Error("Metadata requests have no editor callbacks."); }, () => {});
+    }
+    return this.usageClient.request(method, params);
+  }
+  async diagnose(exportFile = false) {
+    const checks = validateChecks(vscode.workspace.getConfiguration("genericAgent", this.session().folder.uri).get("checks", {}));
+    const report = record(await this.metadata("diagnostics/query", { checks: Object.fromEntries(Object.entries(checks).map(([name, check]) => [name, check.command])) }));
+    report.backendMatches = report.backend === "0.12.0" && report.protocol === 2;
+    const text = JSON.stringify(report, null, 2);
+    if (exportFile) {
+      const destination = await vscode.window.showSaveDialog({ title: "Export redacted agent diagnostics", filters: { JSON: ["json"] } });
+      if (destination) await fs.writeFile(destination.fsPath, text + "\n", { flag: "wx", mode: 0o600 });
+    } else {
+      void this.view?.webview.postMessage({ type: "progress", text });
+      await vscode.window.showInformationMessage("Diagnostics complete. " + text);
+    }
+  }
+  async savedSessions(remove = false) {
+    this.trusted();
+    const session = this.session();
+    if (session.busy) throw Error("Stop the current run before managing saved sessions.");
+    const params = { workspace: session.folder.uri.fsPath };
+    const saved = await this.metadata("session/listSaved", params);
+    if (!Array.isArray(saved)) throw Error("Invalid saved-session list.");
+    const choice = await vscode.window.showQuickPick(saved.map(value => {
+      const item = record(value), connection = record(item.connection);
+      return { label: String(item.id), description: `${connection.provider} / ${connection.model}`, id: String(item.id) };
+    }), { title: remove ? "Delete saved conversation" : "Resume conversation in Plan" });
+    if (!choice) return;
+    if (remove) {
+      const answer = await vscode.window.showWarningMessage("Delete this saved conversation?", "Delete", "Keep");
+      if (answer !== "Delete") return;
+      await this.metadata("session/deleteSaved", { ...params, sessionId: choice.id });
+      if (session.usageId === choice.id) {
+        await this.stop();
+        session.client?.dispose(); session.client = undefined;
+        session.usageId = randomUUID();
+      }
+      return;
+    }
+    if (!vscode.workspace.getConfiguration("genericAgent", session.folder.uri).get("persistSession", false))
+      throw Error("Enable genericAgent.persistSession in user settings to opt into local prompt/source recovery. Snapshots expire after 30 inactive days.");
+    const instructions = await this.loadInstructions(session);
+    const result = record(await this.metadata("session/resumeSaved", { ...params, sessionId: choice.id }));
+    await this.stop();
+    session.client?.dispose(); session.completion?.dispose();
+    session.client = session.completion = undefined;
+    session.checkpoint = record(result.checkpoint);
+    session.instructions = instructions;
+    session.usageId = choice.id;
+    session.mode = "plan";
+    session.permissions.clear(); session.checks = [];
+    this.selected = session; this.attachments = [];
+    session.messages = [{ role: "status", text: "Resumed completed turns in Plan. Plan acceptance and verification reset; no actions replayed. The current provider configuration remains active." }];
+    if (result.workspaceChanged) session.messages.push({ role: "status", text: "Workspace changed or its previous fingerprint is unavailable. Inspect current files before implementation." });
+    ++this.usageGeneration;
+    this.publish();
+  }
   async foldersChanged() {
     const selected = this.selected;
     const roots = new Set(
@@ -918,6 +1028,7 @@ export class Controller
     this.publish();
   }
   async configurationChanged() {
+    this.invalidateVerification();
     await this.stopAll();
     for (const s of this.sessions.values()) {
       s.client?.dispose();
@@ -954,6 +1065,11 @@ export class Controller
 }
 export function activate(context: vscode.ExtensionContext) {
   const controller = new Controller(context);
+  const watcher = vscode.workspace.createFileSystemWatcher("**/*");
+  context.subscriptions.push(watcher,
+    watcher.onDidChange(() => controller.invalidateVerification()),
+    watcher.onDidCreate(() => controller.invalidateVerification()),
+    watcher.onDidDelete(() => controller.invalidateVerification()));
   context.subscriptions.push(
     controller,
     vscode.window.registerWebviewViewProvider(
@@ -981,6 +1097,10 @@ export function activate(context: vscode.ExtensionContext) {
   );
   command("setup", () => controller.action({ type: "setup" }));
   command("configure", () => controller.configure());
+  command("diagnose", () => controller.diagnose());
+  command("exportDiagnostics", () => controller.diagnose(true));
+  command("sessions", () => controller.savedSessions());
+  command("deleteSession", () => controller.savedSessions(true));
   command("usage", async () => {
     await vscode.commands.executeCommand("genericAgent.sidebar.focus");
     await controller.showUsage();
@@ -1011,11 +1131,13 @@ export function activate(context: vscode.ExtensionContext) {
           "maxSteps",
           "maxContextChars",
           "inline.model",
+          "requestTimeout", "maxOutputTokens", "persistSession",
         ].some((k) => e.affectsConfiguration("genericAgent." + k))
       )
         void controller.configurationChanged().catch(() => {});
     }),
     vscode.workspace.onDidGrantWorkspaceTrust(() => controller.publish()),
+    vscode.workspace.onDidChangeTextDocument(() => controller.invalidateVerification()),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       void controller.foldersChanged().catch(() => {});
     }),

@@ -2,11 +2,21 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { sha } from "./shared";
 export class Runtime {
   constructor(private context: vscode.ExtensionContext) {}
   private get directory() {
-    return path.join(this.context.globalStorageUri.fsPath, "backend-0.11.0");
+    const root = this.context.globalStorageUri.fsPath;
+    try {
+      const active = JSON.parse(readFileSync(path.join(root, "backend-0.12.0-active.json"), "utf8"));
+      if (typeof active.directory !== "string" || !/^backend-0\.12\.0-[a-f0-9-]{36}$/.test(active.directory)) throw Error("Invalid runtime pointer.");
+      return path.join(root, active.directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return path.join(root, "backend-0.12.0");
+    }
   }
   get python() {
     return path.join(
@@ -30,7 +40,7 @@ export class Runtime {
       typeof m.sha256 !== "string"
     )
       throw Error("Invalid bundled backend manifest.");
-    return m as { file: string; sha256: string };
+    return m as { file: string; sha256: string; locks?: Record<string, string> };
   }
   async ready(provider: string) {
     try {
@@ -74,6 +84,9 @@ export class Runtime {
     );
     if (sha(await fs.readFile(wheel)) !== manifest.sha256)
       throw Error("Bundled wheel integrity check failed.");
+    for (const file of ["runtime-base.txt", "runtime-openai.txt", "dependencies.json"])
+      if (sha(await fs.readFile(path.join(this.context.extensionPath, "backend", file))) !== manifest.locks?.[file])
+        throw Error("Bundled runtime lock integrity check failed.");
     const sdk = ["openai", "openai-compatible"].includes(
       cfg.get<string>("provider") || "demo",
     );
@@ -83,42 +96,55 @@ export class Runtime {
         title: "Setting up Coding Agent backend",
       },
       async () => {
-        await fs.mkdir(this.context.globalStorageUri.fsPath, {
+        const storage = this.context.globalStorageUri.fsPath;
+        await fs.mkdir(storage, {
           recursive: true,
         });
+        const lock = path.join(storage, "backend-setup.lock");
+        const handle = await fs.open(lock, "wx", 0o600).catch(() => { throw Error("Backend setup is already running, or a stale backend-setup.lock remains. Stop other setup processes before removing it."); });
+        const candidate = path.join(storage, "backend-0.12.0-" + randomUUID());
+        const candidatePython = path.join(candidate, process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+        let committed = false;
+        let temporary: string | undefined;
+        try {
         await this.command(python, [
           "-I",
           "-c",
-          "import sys; assert sys.version_info >= (3,11)",
+          "import sys; assert (3,11) <= sys.version_info[:2] <= (3,14)",
         ]);
-        await fs.rm(path.join(this.directory, "ready.json"), { force: true });
-        await this.command(python, ["-I", "-m", "venv", this.directory]);
-        await this.command(this.python, [
+        await this.command(python, ["-I", "-m", "venv", candidate]);
+        const requirements = path.join(this.context.extensionPath, "backend", sdk ? "runtime-openai.txt" : "runtime-base.txt");
+        await this.command(candidatePython, ["-I", "-m", "pip", "install", "--require-hashes", "--only-binary=:all:", "-r", requirements]);
+        await this.command(candidatePython, [
           "-I",
           "-m",
           "pip",
           "install",
-          "--upgrade",
-          "pip",
-          "setuptools",
+          "--no-deps",
+          wheel,
         ]);
-        await this.command(this.python, [
-          "-I",
-          "-m",
-          "pip",
-          "install",
-          "--upgrade",
-          wheel + (sdk ? "[openai]" : ""),
-        ]);
-        await this.command(this.python, [
+        await this.command(candidatePython, [
           "-I",
           "-c",
-          "import agent.server; assert agent.server.PROTOCOL_VERSION == 1",
+          "import agent.server; assert agent.server.PROTOCOL_VERSION == 2",
         ]);
         await fs.writeFile(
-          path.join(this.directory, "ready.json"),
+          path.join(candidate, "ready.json"),
           JSON.stringify({ sha256: manifest.sha256, sdk }),
         );
+        temporary = path.join(storage, ".active-" + randomUUID());
+        let previous = "unavailable";
+        try { previous = path.basename(this.directory); } catch { previous = "invalid-pointer-preserved-as-old-directory"; }
+        await fs.writeFile(temporary, JSON.stringify({ directory: path.basename(candidate), previous }), { mode: 0o600 });
+        await fs.rename(temporary, path.join(storage, "backend-0.12.0-active.json"));
+        temporary = undefined;
+        committed = true;
+        } finally {
+          await handle.close();
+          await fs.rm(lock, { force: true });
+          if (temporary) await fs.rm(temporary, { force: true });
+          if (!committed) await fs.rm(candidate, { recursive: true, force: true });
+        }
       },
     );
     void vscode.window.showInformationMessage("Coding Agent backend is ready.");

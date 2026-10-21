@@ -32,7 +32,7 @@ class ServerTests(unittest.TestCase):
         self.output = io.StringIO()
         self.server = Server(self.output)
         self.addCleanup(self.server.close)
-        self.config = {'protocolVersion': 1, 'workspace': str(self.root), 'provider': 'demo'}
+        self.config = {'protocolVersion': 2, 'workspace': str(self.root), 'provider': 'demo'}
         self.request(1, 'initialize', self.config)
 
     def request(self, request_id, method, params=None):
@@ -85,7 +85,7 @@ class ServerTests(unittest.TestCase):
         self.request(5, 'unknown')
         self.assertEqual(self.wait(lambda f: f.get('id') == 5)['error']['code'], -32601)
         for i, config in enumerate([
-                {**self.config, 'protocolVersion': 2},
+                {**self.config, 'protocolVersion': 1},
                 {**self.config, 'checks': {'lint_fix': {'command': ['bad']}}},
                 {**self.config, 'checks': {'test': {'command': ['x'], 'timeout': float('nan')}}},
                 {**self.config, 'maxSteps': True}], 10):

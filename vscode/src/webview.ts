@@ -126,7 +126,7 @@ window.addEventListener("message", (event) => {
   for (const check of data.checks) {
     const item = document.createElement("details");
     const title = document.createElement("summary");
-    title.textContent = `${check.profile}: ${check.result.passed ? "passed" : check.result.not_run ? "not run" : "failed"}`;
+    title.textContent = `${check.profile}: ${String(check.result.status || (check.result.passed ? "passed" : check.result.not_run ? "not run" : "failed")).replaceAll("_", " ")}`;
     const body = document.createElement("pre");
     body.textContent = JSON.stringify(check.result, null, 2);
     item.append(title, body);

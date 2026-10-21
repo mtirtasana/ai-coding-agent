@@ -40,18 +40,23 @@ class StepLimitError(RuntimeError):
     pass
 
 
+class OutputLimitError(RuntimeError):
+    pass
+
+
 class Agent:
     def __init__(self, model: ModelProvider, tools: ToolExecutor,
                  events: EventSink | None = None, max_steps: int = 15,
                  max_context_chars: int = 200_000,
                  context_builder: ContextBuilder | None = None,
                  mode: str = "implement", project_instructions: str = "",
-                 cancellation: CancellationToken | None = None):
+                 cancellation: CancellationToken | None = None, verification=None):
         if max_steps < 1 or max_context_chars < 1:
             raise ValueError("Schritt- und Kontextlimit müssen positiv sein.")
         self.cancellation = cancellation or CancellationToken()
         self.model, self.tools, self.events = model, ModeToolExecutor(tools, mode), events
         self.mode, self.project_instructions = mode, project_instructions
+        self.verification = verification
         self.max_steps, self.max_context_chars = max_steps, max_context_chars
         self.context_builder = context_builder if context_builder is not None else RuleBasedContextBuilder()
 
@@ -60,6 +65,14 @@ class Agent:
             self.events.emit(kind, data)
 
     def run(self, task: str, state: ConversationState | None = None) -> RunResult:
+        try:
+            return self._run(task, state)
+        except BaseException:
+            if self.verification is not None:
+                self.emit('verification', results=[asdict(item) for item in self.verification.evidence()])
+            raise
+
+    def _run(self, task: str, state: ConversationState | None = None) -> RunResult:
         specs = tuple(self.tools.specifications())
         messages = [Message("system", INSTRUCTIONS), Message("system", MODE_INSTRUCTIONS[self.mode])]
         if any(spec.name == 'read_file_range' for spec in specs):
@@ -86,7 +99,11 @@ class Agent:
                 raise
             self.emit("context_selected", step=step, **asdict(selection.stats))
             model_response = self.model.generate(selection.messages, specs)
+            self.emit("model_completed", step=step, tool_calls=len(model_response.message.tool_calls),
+                      usage=asdict(model_response.usage) if model_response.usage is not None else None)
             self.cancellation.check()
+            if model_response.truncated:
+                raise OutputLimitError('Provider output limit reached; incomplete response was not executed or committed.')
             response = model_response.message
             if response.role != "assistant":
                 raise ValueError("Modell muss eine Assistant-Nachricht liefern.")
@@ -95,16 +112,17 @@ class Agent:
                 raise ValueError("Doppelte Werkzeugaufruf-ID.")
             messages.append(response)
             requests.append(RequestMetrics(step, selection.stats, model_response.usage))
-            self.emit("model_completed", step=step, tool_calls=len(ids),
-                      usage=asdict(model_response.usage) if model_response.usage is not None else None)
             if not response.tool_calls:
+                evidence = [] if self.verification is None else list(self.verification.evidence())
+                if self.verification is not None:
+                    self.emit('verification', results=[asdict(item) for item in evidence])
                 self.emit("run_completed", steps=step)
                 with self.cancellation.guard():
                     if state is not None:
                         state.messages = list(messages[fixed_count:])
                         if self.mode == "plan":
                             state.latest_plan = response.content
-                return RunResult(response.content, step, messages, requests)
+                return RunResult(response.content, step, messages, requests, evidence)
             for call in response.tool_calls:
                 self.cancellation.check()
                 self.emit('tool_started', name=call.name)

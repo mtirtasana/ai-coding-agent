@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { FilePolicy } from "./filePolicy";
 import {
   relativePath,
   protectedPart,
@@ -80,6 +81,10 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
     relativePath(root, resolved);
     if (path.relative(root, resolved).split(path.sep).some(protectedPart))
       throw Error("Protected path.");
+    const policy = new FilePolicy(root);
+    const directory = await fs.stat(resolved).then(info => info.isDirectory(), () => false);
+    if (await policy.denied(path.relative(root, resolved), directory) || await policy.denied(path.relative(root, requested), directory))
+      throw Error("Path denied by agent file policy.");
     return resolved;
   }
   async read(name: string) {
@@ -252,11 +257,13 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
       if (name === "list_files") {
         const entries = await fs.readdir(file, { withFileTypes: true });
         entries.sort((a, b) => a.name.localeCompare(b.name));
+        const policy = new FilePolicy(await this.canonicalRoot());
+        const eligible = [];
+        for (const entry of entries.slice(0, 500))
+          if (!await policy.ignored(path.relative(await this.canonicalRoot(), path.join(file, entry.name)), entry.isDirectory())) eligible.push(entry);
         return {
           ok: true,
-          content: entries
-            .slice(0, 500)
-            .filter((e) => !protectedPart(e.name))
+          content: eligible
             .map((e) => e.name + (e.isDirectory() ? "/" : ""))
             .join("\n"),
         };
@@ -364,6 +371,7 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
             skip.has(entry.name)
           )
             continue;
+          if (await new FilePolicy(canonicalRoot).ignored(path.relative(canonicalRoot, path.join(file, entry.name)), entry.isDirectory())) continue;
           queue.push(
             await this.guarded(
               path.relative(canonicalRoot, path.join(file, entry.name)),

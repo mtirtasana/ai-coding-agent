@@ -81,8 +81,8 @@ may require a direct scanner run for investigation.
 
 Report tests, lint, security and dependency results separately. Missing scans are
 not run. A successful scan applies to the scanned code and installed versions at
-that moment; edits or dependency changes require another check. The prompt
-requests this behavior; no persistent verification ledger enforces freshness.
+that moment; edits or dependency changes require another check. Since 0.12, host-owned [verification evidence](production-readiness.md) conservatively
+tracks freshness within its observed input scope. It is not a persistent proof of correctness.
 There is no security-fix tool, automatic dependency upgrade, or automatic advisory
 suppression. Correct a finding deliberately, review the diff, then rerun relevant
 scans and tests.

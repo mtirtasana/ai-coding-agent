@@ -1,4 +1,4 @@
-# VS Code extension architecture (v0.3.0 / backend v0.11)
+# VS Code extension architecture (v0.4.0 / backend v0.12)
 
 The extension adds an editor adapter to the generic agent. It preserves the
 Python CLI and its file-based behavior. Read the [extension user guide](../vscode/README.md)
@@ -29,7 +29,7 @@ it does not receive API keys or execute project commands. Runtime configuration
 and effects are owned by the extension host, not webview/model-supplied paths.
 
 The managed environment is created only by the setup/update command, using a
-selected Python 3.11+ interpreter. The VSIX bundles a wheel and SHA-256 manifest;
+selected Python 3.11–3.14 interpreter. The VSIX bundles a wheel and SHA-256 manifest;
 the environment marker records that exact wheel and whether provider SDKs were
 installed. Setup invalidates the readiness marker before installation. A failed
 setup must be corrected before that environment is used. The checksum detects
@@ -75,7 +75,8 @@ validation precedes discarding old state. Nested instructions are not discovered
 The worker and extension keep the last successful checkpoint in memory. Only
 completed turns enter it. Cancelling or crashing a worker does not promote its
 partial history. A replacement worker can restore that checkpoint while VS Code
-remains open. Extension/window restart loses conversations and plans. This is not
+remains open. Extension/window restart loses conversations and plans unless opt-in completed-turn
+recovery is enabled. That uses separate JSON snapshots rather than
 SQLite persistence or an event-sourced recovery system.
 
 ## Buffer ownership and reviewed edits
@@ -92,8 +93,8 @@ total line count, version and a full-buffer hash. Numeric arguments are validate
 independently in Python and TypeScript. A range hash works with the existing
 reviewed edit flow; external changes or edits elsewhere in the buffer make it
 stale. See [focused reads](token-efficiency.md) for EOF semantics and paired
-evaluation, including overhead on small files. JSON-RPC remains protocol 1;
-the extension and bundled backend now require matching version 0.11.0. This
+evaluation, including overhead on small files. JSON-RPC now uses protocol 2;
+the extension and bundled backend now require matching version 0.12.0. This
 backend also includes CLI workflow improvements; terminal review/attachments are
 CLI adapters and do not replace the editor's existing review flow.
 
@@ -219,3 +220,13 @@ worker, which deduplicates it against SQLite. Generation guards reject stale
 reports; deadlines bound report/snapshot waits. CLI and editor workers on the same
 host/state directory share historical metadata, but keep separate conversations
 and credential stores. See [schema, periods and privacy](providers-and-usage.md).
+
+## Supervised baseline (0.4)
+
+Host-owned check evidence and editor revisions expose stale/unknown verification;
+assistant statements do not create passing records. Machine-scoped `persistSession`
+opts users into local completed-turn recovery with 30-day expiry. Resume starts in
+Plan, resets permissions/verification and never replays edits. Diagnostics and
+redacted export use a provider-free metadata worker. RPC deadlines dispose stalled
+workers. Setup installs hash-pinned dependencies into a separate candidate and
+publishes a runtime pointer only after readiness. See [limits and rollout](production-readiness.md).

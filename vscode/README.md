@@ -10,7 +10,7 @@ WSL and Dev Containers. Browser-only and virtual workspaces are unsupported.
 Install the generated `.vsix` using **Extensions: Install from VSIX**. Open a
 trusted filesystem workspace. Run **Coding Agent: Configure Provider**, then
 **Coding Agent: Set Up / Update Backend**. Setup explicitly creates a managed
-environment using your chosen Python 3.11+ interpreter and may download packages.
+environment using your chosen Python 3.11–3.14 interpreter and may download packages.
 Python itself is not installed automatically. Ollama requires an existing server
 and installed model. Demo needs no model or API key.
 
@@ -75,7 +75,7 @@ See [usage architecture, dates and storage locations](../docs/providers-and-usag
 Backend 0.9 introduced bounded `read_file_range` requests over the current editor
 buffer, including unsaved text. The full-buffer hash still protects reviewed
 edits. Existing full reads remain available. See [focused reads and measured
-context cost](../docs/token-efficiency.md). Extension 0.3.0 bundles backend 0.11.0,
+context cost](../docs/token-efficiency.md). Extension 0.4.0 bundles backend 0.12.0,
 including the CLI workflow adapters. After installing it, run
 **Coding Agent: Set Up / Update Backend** to prepare its matching backend.
 
@@ -95,14 +95,14 @@ that you choose to send to a model.
 
 **Stop** cancels pending approvals, stops tracked check processes and discards
 late responses. A new worker restores only completed conversation turns retained
-in extension memory. Restarting VS Code loses the conversation. If process cleanup
+in extension memory. Restarting VS Code loses the conversation unless local recovery is enabled. If process cleanup
 fails, inspect the workspace host before retrying; arbitrary escaped subprocesses
 are outside the isolation guarantee. Changing critical settings stops workers
 and invalidates execution permissions.
 
 ## Build and test
 
-From this directory, with Node 22+ and Python 3.11+:
+From this directory, with Node 22+ and Python 3.11–3.14:
 
 ```bash
 npm ci
@@ -120,3 +120,17 @@ needs a display, for example `xvfb-run -a npm run test:integration`. Set
 `VSCODE_TEST_VERSION=1.95.3` to test the minimum supported release family.
 The VSIX includes only compiled UI/extension assets and the bundled Python wheel;
 it contains no project dependencies, keys or `node_modules`.
+
+## Internal production baseline
+
+This build is a release candidate; [live-provider/vault gates](../release/checklist.json)
+remain pending. Check results now distinguish stale, unknown and not-run evidence.
+`.agentignore` denies all agent file access, while `.gitignore` limits discovery.
+
+Enable user setting `genericAgent.persistSession` to store completed prompts/source
+locally, with 30-day inactive expiry. Use **Resume Saved Conversation** or **Delete
+Saved Conversation**. Resume enters Plan without replaying tools or retaining plan
+acceptance. **Diagnose Setup** and **Export Redacted Diagnostics** expose setup status
+without provider requests or source/key data. Backend updates stage a separate
+hash-pinned environment and keep the existing one on failure. Install the matching
+VSIX, then run **Set Up / Update Backend**. Read the [full production procedure](../docs/production-readiness.md).

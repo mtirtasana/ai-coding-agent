@@ -13,7 +13,8 @@ export const profiles: Profile[] = [
   "dependency_audit",
 ];
 export const protectedPart = (p: string) =>
-  [".git", ".ssh", ".aws"].includes(p) || p.startsWith(".env");
+  [".git", ".ssh", ".aws", ".azure", ".config", ".agentignore", ".netrc", ".npmrc", ".pypirc", "credentials", "credentials.json", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"].includes(p.toLowerCase()) ||
+  p.toLowerCase().startsWith(".env") || /\.(pem|key|p12|pfx)$/i.test(p);
 export const sha = (s: string | Buffer) =>
   createHash("sha256").update(s).digest("hex");
 export function lineRange(text: string, start: unknown, end: unknown) {

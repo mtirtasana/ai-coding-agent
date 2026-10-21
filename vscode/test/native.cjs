@@ -171,12 +171,20 @@ exports.run = async () => {
     session.busy = true;
     await controller.showUsage({ period: "all" });
     assert(controller.usageClient.running);
+    const report = await controller.metadata("diagnostics/query");
+    assert.equal(report.protocol, 2);
+    assert.equal(report.model_requests_made, false);
+    assert(commands.includes("genericAgent.sessions"));
+    assert(commands.includes("genericAgent.exportDiagnostics"));
+    session.checks = [{ profile: "test", result: { passed: true, status: "passed" } }];
+    controller.invalidateVerification();
+    assert.equal(session.checks[0].result.status, "stale");
     session.busy = false;
     const oldSession = session.usageId;
     await controller.action({ type: "new" });
     assert.notEqual(session.usageId, oldSession);
     assert.equal(session.mode, "plan");
-    console.log("Native usage tests passed: command registration, credential-free report worker, query while busy and New conversation identity.");
+    console.log("Native production tests passed: usage/diagnostic commands, credential-free reporting while busy, stale evidence and New conversation identity.");
   } finally {
     session.busy = false;
     controller.usageClient?.dispose();

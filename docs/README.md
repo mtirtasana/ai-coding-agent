@@ -1,7 +1,7 @@
 # Documentation
 
 This documentation describes the generic coding agent implemented in version
-0.11.0, including provider profiles, historical usage reports, the improved interactive CLI, focused range reads and the VS Code editor adapter on PR #1. The component reference and
+0.12.0, including the supervised production baseline, provider profiles, historical usage reports, the improved interactive CLI, focused range reads and the VS Code editor adapter on PR #1. The component reference and
 ADRs are in English. Earlier operational guides are available in German or
 English as indicated below.
 
@@ -9,6 +9,7 @@ English as indicated below.
 
 | Goal | Start here | Then read |
 | --- | --- | --- |
+| Deploy the internal release candidate | [Production baseline](production-readiness.md) | [Release checklist](../release/checklist.json), [Changelog](../CHANGELOG.md) |
 | Understand the system without reading all source files | [Component reference](components.md) | Its worked example and component map |
 | Understand why the system has this structure | [ADR index](adr/README.md) | The decision relevant to your change |
 | Use the VS Code extension | [Extension guide](../vscode/README.md) | [Editor architecture](vscode-extension.md) |
@@ -33,7 +34,7 @@ quantities or specify contracts; they are not claims of formal verification.
 Research references explain related ideas and do not establish benchmark results
 for this repository.
 
-Conversation persistence, semantic retrieval, automatic summarization, model-response
+Artifact persistence, semantic retrieval, automatic summarization, model-response
 caching, OS process isolation and multi-agent orchestration remain unimplemented.
 There is no published live-model accuracy or token-saving result in these docs.
 

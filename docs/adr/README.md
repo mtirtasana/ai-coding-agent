@@ -36,9 +36,12 @@ formal review process that did not occur.
 | [0018](0018-interactive-cli-workflow.md) | Add bounded attachments and opt-in reviewed terminal writes | Accepted | CLI, prompts and presentation |
 | [0019](0019-provider-profiles-and-keychains.md) | Named CLI profiles and OS-keychain references | Accepted | Connection controller and profile store |
 | [0020](0020-host-local-usage-ledger.md) | Host-local metadata ledger with incomplete-usage coverage | Accepted | Metered provider, SQLite and report workers |
+| [0021](0021-production-evidence-and-safety.md) | Supervised defaults and verification freshness | Accepted | File policy and typed evidence |
+| [0022](0022-opt-in-recovery.md) | Opt-in completed-turn recovery | Accepted | Local snapshots and resume |
+| [0023](0023-locked-internal-releases.md) | Locked runtimes and explicit release gates | Accepted | Setup, locks and artifact manifest |
 
-Record 0012 still defers conversation persistence and caching. Record 0020
-partially supersedes it for usage metadata only. Records 0019–0020 were recorded
+Records 0020 and 0022 partially supersede record 0012 for usage and opt-in
+conversation snapshots. Artifact caching remains deferred. Records 0019–0023 were recorded
 on 2026-10-21.
 
 ## Record lifecycle

@@ -9,6 +9,9 @@ Usage metadata now has its own SQLite adapter under ADR-0020. The original
 rationale below remains applicable to conversations, artifacts and model caches;
 it is historical for the claim that no persistence adapter exists.
 
+[ADR-0022](0022-opt-in-recovery.md) also supersedes the conversation-snapshot
+deferral as of 0.12. Artifact caches, summaries and retrieval storage remain deferred.
+
 ## Context
 
 Sessions currently live in one process. Durable history could enable restart,

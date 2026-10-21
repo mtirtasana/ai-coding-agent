@@ -2,7 +2,22 @@
 
 Ein Python-Grundgerüst mit einem anbieterunabhängigen Agent-Kern. Modelle und
 Werkzeuge werden über Schnittstellen eingebunden. Keine ChatGPT-Mitgliedschaft
-nötig. Python 3.11 oder neuer ist erforderlich.
+nötig. Unterstützt werden Python 3.11–3.14.
+
+## Produktionsbasis: interner Release Candidate
+
+Backend 0.12.0 und Erweiterung 0.4.0 ergänzen standardmäßige Änderungsreviews,
+frische Prüfnachweise, Ausschlussregeln, optionale Wiederaufnahme und kontrollierte
+Backend-Updates. Für betreute Teams mit vertrauenswürdigen Projekten; konfigurierte
+Befehle laufen weiterhin mit den Rechten des Hosts. Live-Anbieter und entsperrte
+OS-Schlüsselbünde benötigen noch reale Freigabetests. Details, Installation,
+Migration und verbleibende Freigabekriterien: [Produktionsleitfaden](docs/production-readiness.md).
+
+```bash
+coding-agent doctor
+coding-agent --provider demo --persist-session
+coding-agent --stats all --stats-export usage.json
+```
 
 ## VS Code-Erweiterung
 
@@ -45,14 +60,16 @@ Prüfergebnisse, Änderungen und tatsächlich gemeldete Tokenwerte getrennt.
 Plan, wechselt den Modus und wartet auf die nächste Aufgabe. Schreibzugriff gibt
 es nur in `implement` mit `--allow-write`; `plan` bleibt immer lesend.
 Die Demo ist kein echtes Planungsmodell; für reale Aufgaben Ollama oder OpenAI wählen.
-Optional verlangt `--allow-write --review-edits` für jede Dateiänderung eine
-Bestätigung des vollständigen Diffs im Terminal. Ohne `--review-edits` bleiben
-direkte Änderungen aktiviert, sofern Schreibrechte bestehen. Review benötigt
+Mit `--allow-write` wird jede Dateiänderung standardmäßig anhand des vollständigen
+Diffs bestätigt. Vertrauenswürdige Automatisierung kann explizit `--no-review-edits`
+angeben; `--review-edits` bleibt unterstützt. Review benötigt
 ein echtes Terminal und lässt sich nicht mit `--lint-fix-command` kombinieren.
 
 Die Root-Datei `AGENTS.md` wird automatisch geladen und im Kontext behalten.
 `/instructions` zeigt den geladenen Stand, `/new` leert die Sitzung und lädt neu.
-Geschichte und Pläne bleiben ausschließlich im Arbeitsspeicher. Einzellauf-Aufrufe
+Geschichte und Pläne bleiben standardmäßig im Arbeitsspeicher. `--persist-session`
+aktiviert lokale Snapshots mit 30 Tagen Aufbewahrung nach letzter Aktivität;
+`/sessions`, `/resume ID` und `/session-delete ID` verwalten diese. Einzellauf-Aufrufe
 mit Aufgabe bleiben erhalten und verwenden standardmäßig `implement`;
 `--mode plan|implement` überschreibt den Standard.
 
@@ -178,7 +195,9 @@ Der [Dokumentationsindex](docs/README.md) bietet passende Lesepfade.
 
 Ein separater [Architekturvorschlag für Kontextverwaltung und SQLite](docs/context-and-persistence.md)
 beschreibt Datenmodell, Cache-Invalidierung und weitere Ausbaustufen. Regelbasierte
-Kontextauswahl und Messung sind implementiert; SQLite, Cache und Zusammenfassungen noch nicht.
+Kontextauswahl, Messung und SQLite-Nutzungsmetadaten sind implementiert; optionale
+Konversations-Snapshots stehen separat bereit. Artefakt-Cache und Zusammenfassungen
+bleiben Vorschläge.
 
 ```mermaid
 flowchart TD

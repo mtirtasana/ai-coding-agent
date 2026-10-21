@@ -37,6 +37,7 @@ class ModelUsage:
 class ModelResponse:
     message: Message
     usage: ModelUsage | None = None
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -67,12 +68,21 @@ class ToolResult:
     content: str
 
 
+@dataclass(frozen=True)
+class CheckEvidence:
+    profile: str
+    status: str  # passed, failed, stale, not_run, unknown
+    fingerprint: str | None = None
+    configuration: str | None = None
+
+
 @dataclass
 class RunResult:
     text: str
     steps: int
     messages: list[Message] = field(default_factory=list)
     requests: list[RequestMetrics] = field(default_factory=list)
+    verification: list[CheckEvidence] = field(default_factory=list)
 
 
 @dataclass

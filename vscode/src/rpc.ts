@@ -114,10 +114,18 @@ export class RpcClient {
       } else p.resolve(msg.result);
     }
   }
-  request(method: string, params: RecordValue = {}): Promise<unknown> {
-    return new Promise((resolve, reject) => {
+  request(method: string, params: RecordValue = {}, timeoutMs?: number): Promise<unknown> {
+    // Human approvals need a longer deadline; ordinary setup/report calls stay short.
+    const deadline = timeoutMs ?? (method === "session/run" ? 30 * 60000 : method === "completion/generate" ? 7000 : 15000);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const result = new Promise((resolve, reject) => {
       const id = ++this.serial;
       this.pending.set(id, { resolve, reject });
+      timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(Error(`Backend request timed out (${method}). Accepted edits may remain; inspect changes before retrying.`));
+        this.fail();
+      }, deadline);
       try {
         this.send({ jsonrpc: "2.0", id, method, params });
       } catch (e) {
@@ -125,6 +133,7 @@ export class RpcClient {
         reject(e);
       }
     });
+    return result.finally(() => { if (timer) clearTimeout(timer); });
   }
   dispose() {
     this.fail();

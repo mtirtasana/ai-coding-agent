@@ -121,13 +121,15 @@ def public_group(value):
 
 
 class UsageJournal:
-    def __init__(self, path=None, warn=lambda message: None, clock=time.time):
+    def __init__(self, path=None, warn=lambda message: None, clock=time.time, max_memory=5000):
         self.path = Path(path) if path is not None else user_directory('state') / 'usage.sqlite3'
         self.warn, self.clock = warn, clock
         self.memory = {}
         self.lock = threading.RLock()
         self.storage_incomplete = False
         self.warned = False
+        self.max_memory = max_memory
+        self.dropped = 0
 
     def warning(self):
         self.storage_incomplete = True
@@ -200,16 +202,37 @@ class UsageJournal:
         with self.lock:
             self.memory[row['request_id']] = row
             self.persist(row)
+            while len(self.memory) > self.max_memory:
+                self.memory.pop(next(iter(self.memory)))
+                self.dropped += 1
+                self.warning()
+                if self.dropped == 1:
+                    self.warn('Usage buffer limit reached; some unpersisted metadata was dropped. History is incomplete.')
         return row['request_id']
 
     def finish(self, request_id, usage=None, status='completed'):
         with self.lock:
-            row = self.memory[request_id]
+            row = self.memory.get(request_id)
+            if row is None:
+                return  # Already durable/finalized, or explicitly reported as dropped.
             row.update(finished=self.clock(), status=status, responded=int(status == 'completed'), _persisted=False)
             for key in TOKEN_FIELDS:
                 count = getattr(usage, key, None)
                 row[key] = count if type(count) is int and 0 <= count <= MAX_INT else None
             self.persist(row)
+            if row['_persisted']:
+                self.memory.pop(request_id)
+
+    def prune(self, before):
+        """Explicit maintenance only; never invoked by ordinary reports or coding."""
+        boundary, _ = period_bounds('custom', before, before)
+        with self.lock:
+            if not self.path.exists():
+                return 0
+            with closing(self.connect(True)) as connection:
+                deleted = connection.execute("DELETE FROM calls WHERE started < ? AND status != 'pending'", (boundary,)).rowcount
+            self.memory = {key: row for key, row in self.memory.items() if row['started'] >= boundary or row['status'] == 'pending'}
+            return deleted
 
     def volatile_calls(self):
         """Read-only snapshots of writes that could not reach SQLite, for sibling workers."""

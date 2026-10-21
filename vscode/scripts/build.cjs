@@ -1,5 +1,6 @@
 const esbuild = require("esbuild");
 Promise.all([
+  esbuild.build({ entryPoints: ["src/filePolicy.ts"], outfile: "dist/filePolicy.cjs", bundle: true, platform: "node", target: "node20" }),
   esbuild.build({
     entryPoints: ["src/extension.ts"],
     outfile: "dist/extension.js",

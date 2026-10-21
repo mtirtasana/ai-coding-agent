@@ -1,0 +1,16 @@
+{
+  "rules": {".gitignore": "build/\n*.log\n!keep.log\nnested/*.tmp\n", "nested/.gitignore": "!keep.tmp\n", ".agentignore": "private/\n*.secret\n!safe.secret\n"},
+  "cases": [
+    {"path": "main.py", "denied": false, "ignored": false},
+    {"path": "trace.log", "denied": false, "ignored": true},
+    {"path": "keep.log", "denied": false, "ignored": false},
+    {"path": "build/output.py", "denied": false, "ignored": true},
+    {"path": "nested/drop.tmp", "denied": false, "ignored": true},
+    {"path": "nested/keep.tmp", "denied": false, "ignored": false},
+    {"path": "private/code.py", "denied": true, "ignored": true},
+    {"path": "auth.secret", "denied": true, "ignored": true},
+    {"path": "safe.secret", "denied": false, "ignored": false},
+    {"path": "tls/client.pem", "denied": true, "ignored": true},
+    {"path": ".ENV.local", "denied": true, "ignored": true}
+  ]
+}

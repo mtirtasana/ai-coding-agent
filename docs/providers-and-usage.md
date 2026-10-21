@@ -1,6 +1,6 @@
 # Provider profiles and recorded token usage
 
-Implemented in backend **0.11.0** and extension **0.3.0**. Provider configuration
+Introduced in backend **0.11.0** and extension **0.3.0**; current **0.12.0 / 0.4.0** adds [hardening and recovery](production-readiness.md). Provider configuration
 and usage reports are local operations: neither implicitly sends a model request.
 The agent remains independent of ChatGPT and supports the existing OpenAI,
 Ollama and OpenAI-compatible adapters.
@@ -249,3 +249,8 @@ tasks as described in [token efficiency](token-efficiency.md).
 
 Decisions: [ADR-0019](adr/0019-provider-profiles-and-keychains.md) and
 [ADR-0020](adr/0020-host-local-usage-ledger.md).
+
+Since 0.12, durable finalized rows leave memory and failed-write buffering is capped.
+Use explicit `--stats-export` and `--stats-prune-before` for storage management;
+usage history has no automatic expiry. Recovery snapshots remain separate from
+this metadata-only ledger. See [production storage behavior](production-readiness.md).

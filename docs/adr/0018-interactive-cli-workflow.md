@@ -58,3 +58,9 @@ scripted model workflow with accepted edits, actual verification and JSON logs.
 
 Persistent sessions, scripting APIs, full-screen navigation, live response
 streaming or non-hard-link filesystems become supported product requirements.
+
+## Later change
+
+[ADR-0021](0021-production-evidence-and-safety.md) changes the default CLI review
+policy in 0.12: writing uses review unless trusted automation explicitly opts out.
+The opt-in-only review description above is historical.

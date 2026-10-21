@@ -78,8 +78,9 @@ Fixes are not rolled back if either process fails.
 The fix result always sets `requires_test_rerun: true`: a lint fix can change
 behavior. The model is instructed to rerun available tests afterward or report
 them as not run. A passing lint result never substitutes for passing tests.
-This is a conservative signal and model instruction, not a persisted workspace-
-version verification ledger or a guarantee that every model follows the instruction.
+Since 0.12, [host-owned verification evidence](production-readiness.md) also invalidates
+passing results after observed edits or configuration changes. Evidence is in memory,
+conservative and limited to its input scope; it is not proof of model correctness.
 
 ## Results and limits
 

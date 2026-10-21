@@ -29,6 +29,12 @@ Version 0.11 adds [provider profiles and a host-local usage ledger](providers-an
 context selection acquires a persistence dependency. The linked guide specifies
 schemas, unknown-value coverage, concurrency, session identity and failure behavior.
 
+Version 0.12 adds [supervised defaults, typed verification evidence, opt-in recovery,
+file policy and locked runtime updates](production-readiness.md). These adapters
+extend the baseline without making the core depend on filesystem or persistence
+implementations. `ModelResponse.truncated` prevents incomplete tool execution;
+`RunResult.verification` carries host-owned check evidence.
+
 ## 1. Problem, terminology and evidence
 
 The agent translates a natural-language coding request into observations,
@@ -578,7 +584,7 @@ explanation grading and a changing advisory database limit reproducibility.
 These are recommendations for an experiment, not additional implemented harness
 features.
 
-Conversation persistence, caching, relevance ranking, summaries, verification ledgers,
+Artifact caching, relevance ranking, summaries, persistent verification ledgers,
 container isolation and multi-agent scheduling are deferred. Persisting H_t in
 a database alone would not change P_B(H_t, A) or transmitted context. Introducing
 them needs its own contracts, invalidation rules and evidence. See

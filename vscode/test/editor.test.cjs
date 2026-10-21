@@ -22,6 +22,7 @@ class Range {
 }
 const uri = (file) => ({ fsPath: file, toString: () => `file:${file}` });
 const vscode = {
+  ProgressLocation: { Notification: 15 },
   Uri: { file: uri, parse: (value) => ({ toString: () => value }) },
   Position,
   Range,
@@ -413,7 +414,7 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     await fs.mkdir(
       path.join(
         storage,
-        "backend-0.11.0",
+        "backend-0.12.0",
         process.platform === "win32" ? "Scripts" : "bin",
       ),
       { recursive: true },
@@ -432,13 +433,13 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     const runtime = controller.runtime;
     await fs.writeFile(runtime.python, "not executed");
     await fs.writeFile(
-      path.join(storage, "backend-0.11.0/ready.json"),
+      path.join(storage, "backend-0.12.0/ready.json"),
       JSON.stringify({ sha256: sha(bytes), sdk: false }),
     );
     assert.equal(await runtime.ready("demo"), runtime.python);
     await assert.rejects(runtime.ready("openai"), /Set Up/);
     await fs.writeFile(
-      path.join(storage, "backend-0.11.0/ready.json"),
+      path.join(storage, "backend-0.12.0/ready.json"),
       JSON.stringify({ sha256: "mismatch", sdk: true }),
     );
     await assert.rejects(runtime.ready("demo"), /Set Up/);
@@ -493,4 +494,75 @@ test("usage refresh works while busy without provider setup, overlays worker mem
     await stale;
     assert.equal(posted.filter(value => value.type === "usage").length, 1);
     await assert.rejects(controller.showUsage({ invalidFilter: "x" }), /Invalid usage/);
+  }));
+
+test("agentignore denial and gitignore discovery match the Python golden cases", async () =>
+  fixture(async (tools, directory) => {
+    const { FilePolicy } = require("../dist/filePolicy.cjs");
+    const fixtures = JSON.parse(await fs.readFile(path.join(__dirname, "../../tests/fixtures/ignore-policy.json"), "utf8"));
+    for (const [name, text] of Object.entries(fixtures.rules)) {
+      await fs.mkdir(path.dirname(path.join(directory, name)), { recursive: true });
+      await fs.writeFile(path.join(directory, name), text);
+    }
+    const policy = new FilePolicy(directory);
+    for (const item of fixtures.cases) {
+      await fs.mkdir(path.dirname(path.join(directory, item.path)), { recursive: true });
+      await fs.writeFile(path.join(directory, item.path), "sample content");
+      assert.equal(await policy.denied(item.path), item.denied, item.path);
+      assert.equal(await policy.ignored(item.path), item.ignored, item.path);
+      if (item.denied) await assert.rejects(tools.guarded(item.path));
+      else assert(await tools.guarded(item.path));
+    }
+    const listing = await tools.execute("list_files", { path: "." }, "plan", () => true);
+    assert.equal(listing.ok, true);
+    assert(!listing.content.includes("trace.log"));
+    assert(!listing.content.includes("private"));
+    assert.equal((await tools.execute("read_file", { path: "trace.log" }, "plan", () => true)).ok, true);
+    await fs.writeFile(path.join(directory, ".agentignore"), Buffer.from([0xff]));
+    await assert.rejects(tools.guarded("main.py"));
+  }));
+
+test("backend updates stage a separate environment and preserve the last working runtime on failure", async () =>
+  fixture(async (_tools, directory) => {
+    const storage = path.join(directory, "storage"), backend = path.join(directory, "backend");
+    await fs.mkdir(backend);
+    const bytes = Buffer.from("wheel");
+    await fs.writeFile(path.join(backend, "backend.whl"), bytes);
+    const locks = {};
+    for (const file of ["runtime-base.txt", "runtime-openai.txt", "dependencies.json"]) {
+      await fs.writeFile(path.join(backend, file), "locked"); locks[file] = sha("locked");
+    }
+    await fs.writeFile(path.join(backend, "manifest.json"), JSON.stringify({ file: "backend.whl", sha256: sha(bytes), locks }));
+    const controller = new Controller({ subscriptions: [], extensionPath: directory, globalStorageUri: uri(storage) });
+    const runtime = controller.runtime;
+    const oldPython = runtime.python;
+    await fs.mkdir(path.dirname(oldPython), { recursive: true });
+    await fs.writeFile(oldPython, "old interpreter");
+    await fs.writeFile(path.join(storage, "backend-0.12.0/ready.json"), JSON.stringify({ sha256: sha(bytes), sdk: false }));
+    let fail = true;
+    runtime.command = async (_binary, args) => {
+      if (args.includes("venv")) {
+        const target = args.at(-1);
+        const binary = path.join(target, process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+        await fs.mkdir(path.dirname(binary), { recursive: true });
+        await fs.writeFile(binary, "candidate");
+      }
+      if (fail && args.includes("--require-hashes")) throw Error("installation interrupted");
+    };
+    const previousInput = vscode.window.showInputBox;
+    vscode.window.showInputBox = async () => "python";
+    vscode.window.withProgress = async (_options, action) => action();
+    vscode.window.showInformationMessage = async () => {};
+    try {
+      replies.push("Set up backend");
+      await assert.rejects(runtime.setup(root.uri), /interrupted/);
+      assert.equal(await runtime.ready("demo"), oldPython);
+      assert.equal(await fs.readFile(oldPython, "utf8"), "old interpreter");
+      assert(!await fs.stat(path.join(storage, "backend-setup.lock")).catch(() => false));
+      fail = false; replies.push("Set up backend");
+      await runtime.setup(root.uri);
+      assert.notEqual(runtime.python, oldPython);
+      assert.equal(await runtime.ready("demo"), runtime.python);
+      assert.equal(await fs.readFile(oldPython, "utf8"), "old interpreter");
+    } finally { vscode.window.showInputBox = previousInput; }
   }));

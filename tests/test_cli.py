@@ -97,7 +97,7 @@ class CliTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory, \
                     patch.object(provider, 'generate', wraps=provider.generate) as generate, \
                     patch('agent.cli.DemoProvider', return_value=provider):
-                self.invoke('Inspect', '--provider', 'demo', '--workspace', directory, '--allow-exec', *flags)
+                self.invoke('Inspect', '--provider', 'demo', '--workspace', directory, '--allow-exec', '--no-review-edits', *flags)
                 checks = {s.name for s in generate.call_args_list[0].args[1]
                           if s.name in {'run_tests', 'run_lint', 'run_lint_fix'}}
                 self.assertEqual(checks, expected)

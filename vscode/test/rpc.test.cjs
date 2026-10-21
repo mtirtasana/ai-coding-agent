@@ -40,12 +40,12 @@ test(
       assert.equal(fs.existsSync(path.join(root, "state")), false);
       const sessionId = require("node:crypto").randomUUID();
       const init = await client.request("initialize", {
-        protocolVersion: 1,
+        protocolVersion: 2,
         workspace: root,
         provider: "demo",
         sessionId,
       });
-      assert.equal(init.protocolVersion, 1);
+      assert.equal(init.protocolVersion, 2);
       const result = await client.request("session/run", {
         task: "Inspect",
         mode: "plan",
@@ -81,3 +81,12 @@ test(
     }
   },
 );
+
+test("an expired RPC deadline rejects and disposes the backend without replay", { timeout: 5000 }, async () => {
+  const client = new RpcClient(python, os.tmpdir(), async () => {}, () => {});
+  try {
+    await assert.rejects(client.request("usage/query", { period: "all" }, 1), /timed out/);
+    assert.equal(client.running, false);
+    await assert.rejects(client.request("usage/query", { period: "all" }), /not running/);
+  } finally { client.dispose(); }
+});

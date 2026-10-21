@@ -121,11 +121,11 @@ stderr diagnostics and exit code 2.
 coding-agent --provider ollama --model YOUR_MODEL --allow-write --review-edits
 ```
 
-`--review-edits` defaults to off and works for interactive and single-task usage.
+Review now defaults to on with `--allow-write` for interactive and single-task usage.
+Use `--no-review-edits` explicitly for trusted automation; `--review-edits` remains supported.
 It requires `--allow-write`, real stdin/stdout terminals and `.[terminal]`.
 These requirements are checked before provider clients are created. It cannot
-be combined with `--lint-fix-command`. Without the flag, existing direct-edit
-behavior remains available.
+be combined with `--lint-fix-command`. Direct-edit behavior requires the explicit `--no-review-edits` flag.
 
 Each `write_file` or `apply_edit` displays its complete unified diff and waits
 for **a/apply** or **r/reject**. Empty input, unrecognized answers and EOF reject;
@@ -323,7 +323,8 @@ termination or a model request continuing on a remote server is not a resumable
 session checkpoint.
 
 History, proposed plans, accepted plans, and prompt input history live only in
-memory. Usage metadata alone is stored in SQLite; see [profiles and reports](providers-and-usage.md). There is no disk prompt history, restart resume, automatic
+memory by default. Opt-in `--persist-session` saves completed-turn snapshots separately;
+see [production recovery](production-readiness.md). Usage metadata alone is stored in SQLite; see [profiles and reports](providers-and-usage.md). There is no disk prompt-input history, automatic
 plan execution, or automatic execution of arbitrary commands. Version 0.5 adds the explicitly configured
 `run_tests` tool; see the [coding workflow guide](coding-workflow.md). Shell redirection or
 external terminal recording may still retain output.
@@ -382,3 +383,12 @@ OS keychain. `/connect NAME` selects one and starts a fresh Plan conversation;
 `/new` changes the usage conversation UUID without deleting historical records.
 Standalone `--connect`, `--profile NAME` and `--stats [period]` are also available.
 Read [the full contract, storage locations and diagrams](providers-and-usage.md).
+
+## Production baseline (0.12)
+
+Review is the writable default; unattended direct writes require explicit opt-out.
+`/sessions`, `/resume ID`, `/session-delete ID` manage opt-in completed-turn recovery.
+Resume enters Plan and resets acceptance/verification; no actions replay.
+`coding-agent doctor` provides local redacted diagnostics. Request/output limits,
+file exclusion policy, host-owned freshness evidence, storage management and internal
+release limits are specified in the [production guide](production-readiness.md).

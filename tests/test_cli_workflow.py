@@ -361,8 +361,8 @@ class CliReviewTests(WorkflowFixture):
         self.assertIn('1 rejected', output)
         self.assertTrue(all(json.loads(line)['event'] for line in trace.splitlines()))
         with patch('agent.cli.DemoProvider', return_value=Model()):
-            output, _ = self.invoke('task', '--allow-write')
-        self.assertEqual(output, 'Finished\n')
+            output, _ = self.invoke('task', '--allow-write', '--no-review-edits')
+        self.assertIn('Finished\n', output)
         self.assertEqual((self.root / 'new.py').read_text(), 'new')
 
     def test_no_progress_keeps_summary_and_hides_raw_model_errors(self):

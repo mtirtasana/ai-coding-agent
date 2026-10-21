@@ -26,6 +26,8 @@ def friendly_error(exc):
         return 'Context budget exceeded. Narrow attachments, start /new, or increase --max-context-chars.'
     if name == 'StepLimitError':
         return 'Step limit reached. Inspect changes before submitting another task or increasing --max-steps.'
+    if name == 'OutputLimitError':
+        return 'Model output limit reached. The incomplete response was not executed. Narrow the task or raise --max-output-tokens.'
     if name in {'AuthenticationError', 'PermissionDeniedError'}:
         return 'Provider access denied. Check the configured API-key environment variable and account permissions.'
     if name == 'RateLimitError':
@@ -63,6 +65,8 @@ class RunObserver:
         elif kind == 'tool_completed':
             self.tools += 1
             self.show(f"{data['name']}: {'completed' if data['ok'] else 'failed'}")
+        elif kind == 'verification':
+            self.checks = [(item['profile'], item['status'].replace('_', ' ')) for item in data['results']]
 
     def show(self, text):
         if self.progress:

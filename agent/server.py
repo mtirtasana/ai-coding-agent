@@ -1,5 +1,6 @@
 """Editor JSON-RPC over UTF-8 JSON lines. stdout is exclusively protocol traffic."""
 import json
+import math
 import sys
 import threading
 from concurrent.futures import Future
@@ -16,8 +17,10 @@ from agent.core.engine import Agent
 from agent.core.types import ConversationState, Message, ToolCall, ToolResult
 from agent.files import Workspace
 from agent.adapters.usage import UsageJournal, MeteredProvider
+from agent.adapters.verification import VerifiedTools, workspace_fingerprint
+from agent.adapters.recovery import RecoveryStore
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 MAX_FRAME = 16 * 1024 * 1024
 PROFILES = {'test': 'run_tests', 'lint': 'run_lint', 'security': 'run_security',
             'dependency_audit': 'run_dependency_audit'}
@@ -58,7 +61,8 @@ def restore_state(value):
 def make_provider(config, *, completion=False):
     name = config['provider']
     model = config.get('model') or ('gpt-4.1' if name == 'openai' else '')
-    options = {'timeout': 5, 'max_output_tokens': 256} if completion else {}
+    options = {'timeout': 5, 'max_output_tokens': 256} if completion else {
+        'timeout': config.get('requestTimeout', 120), 'max_output_tokens': config.get('maxOutputTokens', 4096)}
     if name == 'demo':
         return DemoProvider()
     if name == 'ollama' and model:
@@ -68,7 +72,7 @@ def make_provider(config, *, completion=False):
         raise ValueError('API key is required.')
     if name == 'openai':
         from openai import OpenAI
-        return OpenAIProvider(model, client=OpenAI(api_key=key, timeout=5 if completion else 120,
+        return OpenAIProvider(model, client=OpenAI(api_key=key, timeout=options['timeout'],
                                                    max_retries=0), **options)
     if name == 'openai-compatible' and model:
         return OpenAICompatibleProvider(model, config.get('baseUrl') or '', key, **options)
@@ -122,6 +126,8 @@ class Server:
         self.closed = False
         self.session_id = str(uuid4())
         self.usage = UsageJournal(warn=lambda message: self.emit('usage_warning', {'message': message}))
+        self.recovery = RecoveryStore(warn=lambda message: self.emit('recovery_warning', {'message': message}))
+        self.verification_records = {}
 
     def send(self, value):
         frame = json.dumps({'jsonrpc': '2.0', **value}, ensure_ascii=True)
@@ -145,7 +151,8 @@ class Server:
             self.pending[request_id] = future
         try:
             self.send({'id': request_id, 'method': method, 'params': params})
-            return future.result()
+            # Human diff/check reviews may take time, but cannot wait forever.
+            return future.result(timeout=600)
         finally:
             with self._lock:
                 self.pending.pop(request_id, None)
@@ -160,7 +167,7 @@ class Server:
 
     def initialize(self, params):
         allowed = {'protocolVersion', 'workspace', 'provider', 'model', 'baseUrl', 'apiKey', 'checks',
-                   'maxSteps', 'maxContextChars', 'checkpoint', 'sessionId'}
+                   'maxSteps', 'maxContextChars', 'checkpoint', 'sessionId', 'persistSession', 'requestTimeout', 'maxOutputTokens'}
         if set(params) - allowed or type(params.get('protocolVersion')) is not int or params.get('protocolVersion') != PROTOCOL_VERSION:
             raise ValueError('Incompatible protocol or configuration.')
         if params.get('provider') not in {'demo', 'openai', 'ollama', 'openai-compatible'}:
@@ -181,12 +188,20 @@ class Server:
             if type(params.get(key, default)) is not int or params.get(key, default) < 1:
                 raise ValueError('Invalid budget.')
         state = restore_state(params['checkpoint']) if 'checkpoint' in params else ConversationState()
+        timeout = params.get('requestTimeout', 120)
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
+            raise ValueError('Invalid provider timeout.')
+        if type(params.get('maxOutputTokens', 4096)) is not int or not 1 <= params.get('maxOutputTokens', 4096) <= 100000:
+            raise ValueError('Invalid output limit.')
+        if type(params.get('persistSession', False)) is not bool:
+            raise ValueError('Invalid recovery setting.')
         if 'sessionId' in params:
             if not isinstance(params['sessionId'], str) or str(UUID(params['sessionId'])) != params['sessionId']:
                 raise ValueError('Invalid usage session identifier.')
             self.session_id = params['sessionId']
         self.config, self.workspace, self.state = params, workspace, state
-        return {'protocolVersion': PROTOCOL_VERSION, 'backendVersion': '0.11.0'}
+        self.verification_records.clear()
+        return {'protocolVersion': PROTOCOL_VERSION, 'backendVersion': '0.12.0'}
 
     def run(self, params):
         if set(params) != {'task', 'mode'} or not isinstance(params['task'], str) or not params['task'].strip():
@@ -198,13 +213,23 @@ class Server:
             raise ValueError('Invalid project instructions.')
         model = self.meter(self.provider_factory(self.config), 'agent')
         tools = EditorTools(self.workspace, self.editor, self.config.get('checks', {}), self.token)
-        result = Agent(model, tools, self, mode=params['mode'], project_instructions=instructions,
+        verified = VerifiedTools(tools, lambda: workspace_fingerprint(self.workspace),
+                                 configuration=self.config.get('checks', {}), records=self.verification_records)
+        result = Agent(model, verified, self, mode=params['mode'], project_instructions=instructions,
                        max_steps=self.config.get('maxSteps', 15),
-                       max_context_chars=self.config.get('maxContextChars', 200000), cancellation=self.token).run(
+                       max_context_chars=self.config.get('maxContextChars', 200000), cancellation=self.token,
+                       verification=verified).run(
                            params['task'], self.state)
         self.token.check()
+        if self.config.get('persistSession'):
+            try:
+                self.recovery.save(self.session_id, self.workspace, self.state,
+                                   {'provider': self.config['provider'], 'profile': 'editor', 'model': self.config.get('model', '')})
+            except (OSError, ValueError):
+                self.emit('recovery_warning', {'message': 'Snapshot could not be saved; conversation remains in memory.'})
         return {'text': result.text, 'steps': result.steps, 'checkpoint': asdict(self.state),
-                'requests': [asdict(request) for request in result.requests]}
+                'requests': [asdict(request) for request in result.requests],
+                'verification': [asdict(item) for item in result.verification]}
 
     def complete(self, params):
         if set(params) != {'prefix', 'suffix', 'language'} or any(not isinstance(v, str) for v in params.values()):
@@ -218,7 +243,7 @@ class Server:
                                    Message('user', f"Language: {params['language']}\n{params['prefix']}<CURSOR>{params['suffix']}")], [])
         self.token.check()
         text = response.message.content
-        if response.message.tool_calls or '```' in text:
+        if response.truncated or response.message.tool_calls or '```' in text:
             text = ''
         return {'text': text[:2000], 'usage': None if response.usage is None else asdict(response.usage)}
 
@@ -246,6 +271,32 @@ class Server:
             return
         method, params = message['method'], message.get('params', {})
         try:
+            if method in {'diagnostics/query', 'session/listSaved', 'session/resumeSaved', 'session/deleteSaved'}:
+                if method == 'diagnostics/query':
+                    if set(params) - {'checks'}:
+                        raise ValueError('Diagnostics accepts no provider data.')
+                    checks = params.get('checks', {})
+                    if not isinstance(checks, dict) or set(checks) - set(PROFILES) or any(
+                            not isinstance(command, list) or not command or len(command) > 128 or
+                            any(not isinstance(item, str) or len(item) > 4096 for item in command) for command in checks.values()):
+                        raise ValueError('Invalid diagnostic check definitions.')
+                    from agent.adapters.diagnostics import diagnose
+                    result = diagnose(checks)
+                else:
+                    expected = {'workspace'} if method == 'session/listSaved' else {'workspace', 'sessionId'}
+                    if set(params) != expected or not isinstance(params['workspace'], str):
+                        raise ValueError('Invalid recovery request.')
+                    workspace = Workspace(Path(params['workspace']))
+                    if method == 'session/listSaved':
+                        result = self.recovery.list(workspace)
+                    elif method == 'session/deleteSaved':
+                        self.recovery.delete(params['sessionId'], workspace)
+                        result = {'deleted': True}
+                    else:
+                        state, connection, changed = self.recovery.resume(params['sessionId'], workspace)
+                        result = {'checkpoint': asdict(state), 'connection': connection, 'workspaceChanged': changed}
+                self.send({'id': request_id, 'result': result})
+                return
             if method == 'usage/pending':
                 if params:
                     raise ValueError('Unexpected pending-usage parameters.')
@@ -274,6 +325,7 @@ class Server:
             elif method == 'session/reset':
                 self.state = ConversationState()
                 self.session_id = str(uuid4())
+                self.verification_records.clear()
                 result = {'checkpoint': asdict(self.state)}
             elif method in {'session/run', 'completion/generate'}:
                 self.token = CancellationToken()

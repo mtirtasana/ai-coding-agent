@@ -14,6 +14,8 @@ from agent.core.engine import Agent
 from agent.files import Workspace
 from agent.adapters.connections import ActiveConnection, ConnectionController, ConnectionSetupError, ProfileStore
 from agent.adapters.usage import PERIODS, MeteredProvider, UsageJournal, UsageSession, format_usage
+from agent.adapters.verification import VerifiedTools, workspace_fingerprint
+from agent.adapters.recovery import RecoveryStore, NOTICE
 
 
 def make_cli_provider(settings):
@@ -33,6 +35,27 @@ def make_cli_provider(settings):
 
 
 def main():
+    if sys.argv[1:2] == ['doctor']:
+        doctor = argparse.ArgumentParser(description='Local setup diagnostics; no inference')
+        doctor.add_argument('--test-connection', metavar='PROFILE')
+        doctor.add_argument('--export', type=Path)
+        for name in ('test', 'lint', 'security', 'dependency-audit'):
+            doctor.add_argument('--' + name + '-command')
+        options = doctor.parse_args(sys.argv[2:])
+        from agent.adapters.diagnostics import diagnose, connection_test, export_report
+        import json
+        try:
+            checks = {name: shlex.split(value) for name in ('test', 'lint', 'security', 'dependency_audit')
+                      if (value := getattr(options, name + '_command'))}
+            report = diagnose(checks)
+            if options.test_connection:
+                report['connection_test'] = connection_test(options.test_connection)
+            if options.export:
+                export_report(options.export, report)
+        except (OSError, ValueError):
+            doctor.exit(1, 'Diagnostics could not complete. Check configuration, profile/vault availability or export destination.\n')
+        print(json.dumps(report, indent=2))
+        return
     parser = argparse.ArgumentParser(description="Anbieterunabhängiger Coding-Agent")
     parser.add_argument("task", nargs="?")
     parser.add_argument('--connect', action='store_true', help='Configure/select saved provider profiles, then exit; no inference')
@@ -55,7 +78,14 @@ def main():
     parser.add_argument("--context-mode", choices=["recent", "full"], default="recent",
                         help="recent: neueste vollständige Runden; full: gesamte Historie")
     parser.add_argument("--allow-write", action="store_true")
-    parser.add_argument('--review-edits', action='store_true', help='Opt in to per-edit terminal diff approval; requires --allow-write and a real terminal')
+    review = parser.add_mutually_exclusive_group()
+    review.add_argument('--review-edits', dest='review_edits', action='store_true', default=None, help='Review file edits (default with --allow-write)')
+    review.add_argument('--no-review-edits', dest='review_edits', action='store_false', help='Explicitly permit direct writes for trusted automation')
+    parser.add_argument('--persist-session', action='store_true', help=NOTICE)
+    parser.add_argument('--request-timeout', type=float, default=120)
+    parser.add_argument('--max-output-tokens', type=int, default=4096)
+    parser.add_argument('--stats-export', type=Path, help='Export selected usage as JSON without overwriting files')
+    parser.add_argument('--stats-prune-before', metavar='YYYY-MM-DD', help='Explicitly delete finalized usage older than this local date')
     parser.add_argument('--no-progress', action='store_true', help='Hide interactive progress lines (run summaries remain)')
     parser.add_argument("--allow-exec", action="store_true", help="Enable configured LOCAL verification commands")
     parser.add_argument("--test-command", help="Explicit command, split into arguments; no shell evaluation")
@@ -71,6 +101,10 @@ def main():
         parser.add_argument(f"--{profile}-output-bytes", type=int, default=65536)
     parser.add_argument("--verbose", action="store_true", help="JSONL-Ereignisse auf stderr")
     args = parser.parse_args()
+    review_explicit = args.review_edits is True
+    args.review_edits = args.allow_write if args.review_edits is None else args.review_edits
+    if args.task is not None and args.mode == 'plan' and not review_explicit:
+        args.review_edits = False
     def explicit(flag):
         return any(token == flag or token.startswith(flag + '=') for token in sys.argv[1:])
     if sum((bool(args.connect), args.stats is not None, args.task is not None)) > 1:
@@ -93,7 +127,14 @@ def main():
                 parser.error('Choose a period or custom dates, not both.')
             options['period'] = 'custom'
         try:
-            print(safe_text(format_usage(UsageJournal().query(options))))
+            journal = UsageJournal()
+            if args.stats_prune_before:
+                print(f'Pruned {journal.prune(args.stats_prune_before)} finalized usage records.')
+            report = journal.query(options)
+            if args.stats_export:
+                from agent.adapters.diagnostics import export_report
+                export_report(args.stats_export, report)
+            print(safe_text(format_usage(report)))
         except (OSError, ValueError) as exc:
             parser.error(safe_text(exc))
         return
@@ -113,11 +154,16 @@ def main():
         return
     if args.max_steps < 1 or args.max_context_chars < 1:
         parser.error("Schritt- und Kontextlimit müssen positiv sein.")
-    if args.review_edits:
+    import math
+    if not math.isfinite(args.request_timeout) or args.request_timeout <= 0 or not 1 <= args.max_output_tokens <= 100000:
+        parser.error('Request timeout must be positive/finite; output limit must be 1–100000 tokens.')
+    if args.stats_export or args.stats_prune_before:
+        parser.error('Usage maintenance options require --stats.')
+    if args.review_edits and (args.mode != 'plan' or review_explicit):
         if not args.allow_write:
             parser.error('--review-edits requires --allow-write.')
         if not sys.stdin.isatty() or not sys.stdout.isatty():
-            parser.error('--review-edits requires a real input/output terminal.')
+            parser.error('Writes require a real review terminal; use --no-review-edits explicitly for trusted automation.')
         if args.lint_fix_command:
             parser.error('--review-edits cannot be combined with --lint-fix-command.')
     if args.allow_exec != any((args.test_command, args.lint_command, args.lint_fix_command,
@@ -157,7 +203,7 @@ def main():
         if args.review_edits:
             from agent.terminal import create_review_prompt
             review_session = create_review_prompt()
-        observer = RunObserver(progress=not args.no_progress and sys.stdout.isatty()) if session is not None else None
+        observer = RunObserver(progress=session is not None and not args.no_progress and sys.stdout.isatty())
         if review_session is not None and observer is None:
             observer = RunObserver(progress=False)
         instructions = load_project_instructions(workspace) if session is None else None
@@ -170,6 +216,10 @@ def main():
                 print(safe_text(message), file=sys.stderr)
         journal = UsageJournal(warn=usage_warning)
         identity = UsageSession()
+        recovery = RecoveryStore(warn=usage_warning) if args.persist_session else None
+        if recovery:
+            print(NOTICE)
+            recovery.list(workspace)  # Expire old opted-in snapshots; preserve corrupt/unknown schemas.
         store = ProfileStore(warn=usage_warning)
         selected = args.profile
         legacy = any(explicit(flag) for flag in ('--provider', '--model', '--base-url', '--api-key-env')) or os.getenv('AGENT_PROVIDER') or os.getenv('AGENT_MODEL')
@@ -181,9 +231,16 @@ def main():
             active = ActiveConnection(args.provider, model_name, args.base_url or '', api_key=(
                 os.getenv('OPENAI_API_KEY') if args.provider == 'openai' else os.getenv(args.api_key_env)))
         connections = ConnectionController(make_cli_provider, store, active)
+        verification_records = {}
 
         def agent_factory(current_mode, rules):
             model = connections.ready()
+            if hasattr(model, 'max_output_tokens'):
+                model.max_output_tokens = args.max_output_tokens
+            if hasattr(model, 'timeout'):
+                model.timeout = args.request_timeout
+            if hasattr(model, 'client') and hasattr(model.client, 'with_options'):
+                model.client = model.client.with_options(timeout=args.request_timeout, max_retries=0)
             active = connections.current
             metered = MeteredProvider(model, journal, identity.id, provider_name=active.provider,
                                       model=active.model, profile=active.profile)
@@ -195,11 +252,14 @@ def main():
                 from agent.terminal import confirm_change
                 reviewer = ReviewedWrites(workspace, lambda *args: confirm_change(review_session, print, *args)) if review_session is not None else None
                 tools = ConsoleTools(tools, observer, reviewer)
-            return Agent(metered, tools,
+            verified = VerifiedTools(tools, lambda: workspace_fingerprint(workspace),
+                                     configuration={name: getattr(args, name) for name in ('test_command', 'lint_command', 'security_command', 'dependency_audit_command', 'allow_exec', 'allow_write')},
+                                     records=verification_records)
+            return Agent(metered, verified,
                          EventFanout(observer, JsonlEventSink(sys.stderr) if args.verbose else None),
                          max_steps=args.max_steps, max_context_chars=args.max_context_chars,
                          context_builder=RuleBasedContextBuilder(args.context_mode),
-                         mode=current_mode, project_instructions=rules)
+                         mode=current_mode, project_instructions=rules, verification=verified)
 
         if session is not None:
             InteractiveShell(workspace, agent_factory, mode=mode, execution_enabled=runner is not None,
@@ -209,10 +269,18 @@ def main():
                              audit_enabled='dependency_audit_runner' in security_runners,
                              observer=observer, provider=active.provider,
                              model=active.model, connections=connections, usage=journal, identity=identity,
-                             max_context_chars=args.max_context_chars, review_edits=args.review_edits).run(session)
+                             max_context_chars=args.max_context_chars, review_edits=args.review_edits,
+                             recovery=recovery, reset_verification=verification_records.clear).run(session)
         else:
             try:
-                result = agent_factory(mode, instructions.content).run(args.task)
+                from agent.core.types import ConversationState
+                state = ConversationState()
+                result = agent_factory(mode, instructions.content).run(args.task, state)
+                if recovery:
+                    try:
+                        recovery.save(identity.id, workspace, state, {key: getattr(active, key) for key in ('provider', 'profile', 'model')})
+                    except (OSError, ValueError):
+                        usage_warning('Session snapshot could not be saved; coding changes remain.')
             except BaseException:
                 if observer is not None:
                     observer.summary('interrupted' if sys.exc_info()[0] is KeyboardInterrupt else 'failed')

@@ -370,7 +370,7 @@ class CliAndServerTests(StorageFixture):
         model = Mock()
         model.generate.return_value = ModelResponse(Message('assistant', '```python\npass\n```'), ModelUsage(11, 4))
         server = Server(io.StringIO(), provider_factory=lambda *args, **kwargs: model)
-        server.initialize({'protocolVersion': 1, 'workspace': str(self.workspace), 'provider': 'ollama', 'model': 'local'})
+        server.initialize({'protocolVersion': 2, 'workspace': str(self.workspace), 'provider': 'ollama', 'model': 'local'})
         identity = server.session_id
         self.assertEqual(server.complete({'prefix': '', 'suffix': '', 'language': 'python'})['text'], '')
         server.token.cancel()

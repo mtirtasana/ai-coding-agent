@@ -9,6 +9,7 @@ from agent.adapters.instructions import load_project_instructions
 from agent.adapters.review import full_diff
 from agent.core.types import ConversationState
 from agent.adapters.usage import UsageSession, parse_usage, format_usage
+from agent.adapters.recovery import RecoveryStore
 
 
 COMMANDS = {
@@ -19,6 +20,9 @@ COMMANDS = {
     "/connect": "Create, edit, remove or select a provider profile; /connect NAME selects one.",
     "/providers": "List saved provider profiles without credentials.",
     "/stats": "Usage: session/today/week/month/7d/30d/all or --from DATE --to DATE; filter with --provider/--profile/--model/--interface/--kind.",
+    '/sessions': 'List saved conversations for this workspace (without message content).',
+    '/resume': 'Resume ID into Plan; requires --persist-session. No tools are replayed.',
+    '/session-delete': 'Delete saved session ID. Deleting the active one also disables its autosave.',
     "/attach": 'Queue a file or range: /attach "path" [start:end].',
     "/attachments": "List pending attachments without sending them to a model.",
     "/detach": "Remove an attachment ID, or /detach all.",
@@ -160,7 +164,7 @@ class InteractiveShell:
     def __init__(self, workspace, agent_factory, mode="plan", output=print, execution_enabled=False,
                  lint_enabled=False, lint_fix_enabled=False, security_enabled=False, audit_enabled=False,
                  observer=None, provider='unknown', model='unknown', max_context_chars=200000,
-                 review_edits=False, connections=None, usage=None, identity=None):
+                 review_edits=False, connections=None, usage=None, identity=None, recovery=None, reset_verification=lambda: None):
         if mode not in {"plan", "implement"}:
             raise ValueError("Mode must be plan or implement.")
         self.workspace, self.agent_factory, self.mode = workspace, agent_factory, mode
@@ -170,6 +174,8 @@ class InteractiveShell:
         self.review_edits = review_edits
         self.connections, self.usage = connections, usage
         self.identity = identity or UsageSession()
+        self.recovery, self.persist_current = recovery, recovery is not None
+        self.reset_verification = reset_verification
         self.attachments = Attachments(workspace)
         self.draft = ''
         self.execution_enabled = execution_enabled
@@ -217,6 +223,13 @@ class InteractiveShell:
             status = 'completed'
             self.attachments.clear()
             self.output(result.text)
+            if self.recovery and self.persist_current:
+                try:
+                    profile = self.connections.current.profile if self.connections and self.connections.current else 'ad-hoc'
+                    self.recovery.save(self.identity.id, self.workspace, self.state,
+                                       {'provider': self.provider, 'profile': profile, 'model': self.model})
+                except (OSError, ValueError):
+                    self.output('Session snapshot could not be saved; the conversation remains in memory.')
         self.draft = '' if status == 'completed' else task
         self.observer.summary(status)
         return status == 'completed'
@@ -234,7 +247,7 @@ class InteractiveShell:
             suggestions = get_close_matches(command, COMMANDS, n=3, cutoff=0.4)
             self.output("Unknown command. " + ("Try: " + ", ".join(suggestions) if suggestions else "Use /help."))
             return True
-        if argument and command not in {"/plan", "/attach", "/detach", '/connect', '/stats'}:
+        if argument and command not in {"/plan", "/attach", "/detach", '/connect', '/stats', '/resume', '/session-delete'}:
             self.output(f"{command} does not accept arguments. Use /help.")
             return True
         if command == "/exit":
@@ -258,6 +271,34 @@ class InteractiveShell:
                     self.output(format_usage(self.usage.query(parse_usage(argument), self.identity.id)))
             except (OSError, ValueError) as exc:
                 self.output(f'Usage query error: {safe_text(exc)}')
+        elif command in {'/sessions', '/resume', '/session-delete'}:
+            try:
+                store = self.recovery or RecoveryStore(warn=self.output)
+                if command == '/sessions':
+                    items = store.list(self.workspace)
+                    self.output('\n'.join(f"{item['id']}: {item['connection']['provider']} / {item['connection']['model']}" for item in items) or '(No saved sessions)')
+                elif command == '/resume':
+                    if self.recovery is None:
+                        raise ValueError('Restart with --persist-session to opt into local conversation recovery.')
+                    rules = load_project_instructions(self.workspace)
+                    state, connection, changed = store.resume(argument, self.workspace)
+                    self.state, self.instructions, self.identity.id = state, rules, argument
+                    self.reset_verification()
+                    self.mode, self.draft = 'plan', ''
+                    self.attachments.clear()
+                    self.persist_current = True
+                    self.output('Resumed completed turns in Plan; plan acceptance and verification are reset. No actions replayed.')
+                    if changed:
+                        self.output('Workspace changed or its previous fingerprint is unavailable. Inspect current files before implementation.')
+                    if (connection['provider'], connection['model']) != (self.provider, self.model):
+                        self.output('Saved provider/model differs; the currently selected connection remains active.')
+                else:
+                    store.delete(argument, self.workspace)
+                    if argument == self.identity.id:
+                        self.persist_current = False
+                    self.output('Saved session deleted.')
+            except (OSError, ValueError):
+                self.output('Saved-session operation failed. Check the ID, workspace, recovery opt-in and snapshot format.')
         elif command == '/providers':
             try:
                 profiles = self.connections.store.load() if self.connections else {'profiles': [], 'default': None}
@@ -279,7 +320,9 @@ class InteractiveShell:
                 if selected is not None:
                     self.instructions = instructions
                     self.state = ConversationState()
+                    self.reset_verification()
                     self.identity.reset()
+                    self.persist_current = self.recovery is not None
                     self.attachments.clear()
                     self.draft = ''
                     self.mode = 'plan'
@@ -320,7 +363,9 @@ class InteractiveShell:
                 return True
             self.instructions = instructions
             self.state = ConversationState()
+            self.reset_verification()
             self.identity.reset()
+            self.persist_current = self.recovery is not None
             self.attachments.clear()
             self.draft = ''
             self.mode = "plan"
