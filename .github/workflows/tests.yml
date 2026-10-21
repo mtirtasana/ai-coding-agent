@@ -109,7 +109,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install hash-pinned CLI and provider dependencies
-        run: python -m pip install --require-hashes --only-binary=:all: -r vscode/backend/runtime-cli.txt
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all: -r vscode/backend/runtime-cli.txt
       - name: Install backend without resolving new dependencies
         run: python -m pip install --no-deps --no-build-isolation .
       - name: Production regressions with resolved runtime
