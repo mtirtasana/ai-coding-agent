@@ -8,6 +8,7 @@ from agent.adapters.console import RunObserver, TerminalUnavailable, friendly_er
 from agent.adapters.instructions import load_project_instructions
 from agent.adapters.review import full_diff
 from agent.core.types import ConversationState
+from agent.adapters.usage import UsageSession, parse_usage, format_usage
 
 
 COMMANDS = {
@@ -15,6 +16,9 @@ COMMANDS = {
     "/implement": "Accept the latest plan, switch mode, and wait (writes need --allow-write).",
     "/instructions": "Show the loaded workspace-root AGENTS.md snapshot.",
     "/status": "Show provider, workspace, permissions, budget and pending attachments.",
+    "/connect": "Create, edit, remove or select a provider profile; /connect NAME selects one.",
+    "/providers": "List saved provider profiles without credentials.",
+    "/stats": "Usage: session/today/week/month/7d/30d/all or --from DATE --to DATE; filter with --provider/--profile/--model/--interface/--kind.",
     "/attach": 'Queue a file or range: /attach "path" [start:end].',
     "/attachments": "List pending attachments without sending them to a model.",
     "/detach": "Remove an attachment ID, or /detach all.",
@@ -126,6 +130,23 @@ def create_review_prompt(**kwargs):
     return PromptSession(history=InMemoryHistory(), **kwargs)
 
 
+def create_connection_prompt():
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.history import DummyHistory
+    except ImportError as exc:
+        raise TerminalUnavailable("Provider setup requires: pip install -e '.[terminal,connections]'") from exc
+    ordinary = PromptSession()
+    private = PromptSession(history=DummyHistory())
+
+    def ask(label, default='', secret=False):
+        session = private if secret else ordinary
+        hint = f' [{safe_text(default)}]' if default and not secret else ''
+        answer = session.prompt(safe_text(label) + hint + ': ', default='', is_password=secret)
+        return answer if secret or answer else default
+    return ask
+
+
 def confirm_change(session, output, name, before, after):
     output(safe_text(f'Change to review: {name}\n' + (full_diff(name, before, after) or '(No content difference)')))
     output('Awaiting edit review. Apply or Reject? Default: Reject.')
@@ -139,7 +160,7 @@ class InteractiveShell:
     def __init__(self, workspace, agent_factory, mode="plan", output=print, execution_enabled=False,
                  lint_enabled=False, lint_fix_enabled=False, security_enabled=False, audit_enabled=False,
                  observer=None, provider='unknown', model='unknown', max_context_chars=200000,
-                 review_edits=False):
+                 review_edits=False, connections=None, usage=None, identity=None):
         if mode not in {"plan", "implement"}:
             raise ValueError("Mode must be plan or implement.")
         self.workspace, self.agent_factory, self.mode = workspace, agent_factory, mode
@@ -147,6 +168,8 @@ class InteractiveShell:
         self.observer = observer or RunObserver(self.output)
         self.provider, self.model, self.max_context_chars = provider, model, max_context_chars
         self.review_edits = review_edits
+        self.connections, self.usage = connections, usage
+        self.identity = identity or UsageSession()
         self.attachments = Attachments(workspace)
         self.draft = ''
         self.execution_enabled = execution_enabled
@@ -211,7 +234,7 @@ class InteractiveShell:
             suggestions = get_close_matches(command, COMMANDS, n=3, cutoff=0.4)
             self.output("Unknown command. " + ("Try: " + ", ".join(suggestions) if suggestions else "Use /help."))
             return True
-        if argument and command not in {"/plan", "/attach", "/detach"}:
+        if argument and command not in {"/plan", "/attach", "/detach", '/connect', '/stats'}:
             self.output(f"{command} does not accept arguments. Use /help.")
             return True
         if command == "/exit":
@@ -226,6 +249,46 @@ class InteractiveShell:
             self.output(f'Workspace: {self.workspace.root}\nProvider: {self.provider}\nModel: {self.model}\n'
                         f'Context budget: {self.max_context_chars} characters\nReview edits: {self.review_edits}\n'
                         f'Pending attachments: {len(self.attachments.items)}\n' + self.prompt.strip())
+            self.output(f'Usage session: {self.identity.id}')
+        elif command == '/stats':
+            try:
+                if self.usage is None:
+                    self.output('Usage history is unavailable in this shell integration.')
+                else:
+                    self.output(format_usage(self.usage.query(parse_usage(argument), self.identity.id)))
+            except (OSError, ValueError) as exc:
+                self.output(f'Usage query error: {safe_text(exc)}')
+        elif command == '/providers':
+            try:
+                profiles = self.connections.store.load() if self.connections else {'profiles': [], 'default': None}
+                self.output('\n'.join(f"{p['name']}: {p['provider']} / {p['model']}" +
+                                      (' [default]' if profiles['default'] == p['name'] else '')
+                                      for p in profiles['profiles']) or '(No saved provider profiles)')
+            except (OSError, ValueError) as exc:
+                self.output(f'Provider configuration error: {safe_text(exc)}')
+        elif command == '/connect':
+            try:
+                if self.connections is None:
+                    self.output('Provider switching is unavailable in this shell integration.')
+                    return True
+                parts = shlex.split(argument)
+                if len(parts) > 1:
+                    raise ValueError('Usage: /connect [profile-name]')
+                instructions = load_project_instructions(self.workspace)
+                selected = self.connections.select(parts[0] if parts else '', create_connection_prompt(), self.output)
+                if selected is not None:
+                    self.instructions = instructions
+                    self.state = ConversationState()
+                    self.identity.reset()
+                    self.attachments.clear()
+                    self.draft = ''
+                    self.mode = 'plan'
+                    self.provider, self.model = selected.provider, selected.model
+                    self.output('New conversation in Plan mode. Previous usage remains in history.')
+            except (EOFError, KeyboardInterrupt):
+                self.output('Provider setup cancelled. Current conversation unchanged.')
+            except Exception as exc:
+                self.output(f'Provider setup failed: {friendly_error(exc)} Current conversation unchanged.')
         elif command == '/attachments':
             self.output('\n'.join(f'{item.id}: {item.path} ' + (
                 f'[{item.start}:{item.end}]' if item.start is not None else '[whole file]')
@@ -257,6 +320,7 @@ class InteractiveShell:
                 return True
             self.instructions = instructions
             self.state = ConversationState()
+            self.identity.reset()
             self.attachments.clear()
             self.draft = ''
             self.mode = "plan"

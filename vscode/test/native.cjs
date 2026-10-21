@@ -160,4 +160,28 @@ exports.run = async () => {
   await vscode.window.showTextDocument(doc);
   await vscode.commands.executeCommand("workbench.action.files.revert");
   await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  const commands = await vscode.commands.getCommands(true);
+  assert(commands.includes("genericAgent.usage"));
+  const oldState = process.env.AGENT_STATE_DIR;
+  process.env.AGENT_STATE_DIR = path.join(folder.uri.fsPath, "isolated-usage");
+  const ready = controller.runtime.ready;
+  await fs.mkdir(controller.context.globalStorageUri.fsPath, { recursive: true });
+  controller.runtime.ready = async () => process.env.AGENT_TEST_PYTHON || (process.platform === "win32" ? "python" : "python3");
+  try {
+    session.busy = true;
+    await controller.showUsage({ period: "all" });
+    assert(controller.usageClient.running);
+    session.busy = false;
+    const oldSession = session.usageId;
+    await controller.action({ type: "new" });
+    assert.notEqual(session.usageId, oldSession);
+    assert.equal(session.mode, "plan");
+    console.log("Native usage tests passed: command registration, credential-free report worker, query while busy and New conversation identity.");
+  } finally {
+    session.busy = false;
+    controller.usageClient?.dispose();
+    controller.runtime.ready = ready;
+    if (oldState === undefined) delete process.env.AGENT_STATE_DIR;
+    else process.env.AGENT_STATE_DIR = oldState;
+  }
 };

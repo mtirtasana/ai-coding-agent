@@ -12,6 +12,8 @@ test(
   { timeout: 15000 },
   async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-rpc-"));
+    const priorState = process.env.AGENT_STATE_DIR;
+    process.env.AGENT_STATE_DIR = path.join(root, "state");
     let hold = false;
     let waiting;
     const seen = [];
@@ -33,10 +35,15 @@ test(
       () => {},
     );
     try {
+      const empty = await client.request("usage/query", { period: "all" });
+      assert.equal(empty.totals.calls, 0);
+      assert.equal(fs.existsSync(path.join(root, "state")), false);
+      const sessionId = require("node:crypto").randomUUID();
       const init = await client.request("initialize", {
         protocolVersion: 1,
         workspace: root,
         provider: "demo",
+        sessionId,
       });
       assert.equal(init.protocolVersion, 1);
       const result = await client.request("session/run", {
@@ -46,6 +53,10 @@ test(
       assert.match(result.text, /sample.py/);
       assert(result.checkpoint.messages.length > 0);
       assert(seen.includes("editor/tool"));
+      const usage = await client.request("usage/query", { period: "session", sessionId });
+      assert(usage.totals.calls > 0);
+      assert.equal(usage.groups[0].interface, "vscode");
+      assert.equal(usage.totals.tokens.input_tokens.reported_sum, null);
       await assert.rejects(
         client.request("initialize", { protocolVersion: 99 }),
         /Invalid request/,
@@ -56,12 +67,16 @@ test(
       for (let i = 0; i < 200 && !waiting; i++)
         await new Promise((r) => setTimeout(r, 5));
       assert(waiting);
+      const busyUsage = await client.request("usage/query", { period: "session", sessionId });
+      assert.equal(busyUsage.totals.calls, usage.totals.calls);
       const cancelled = await client.request("cancel");
       assert.equal(cancelled.cleanupComplete, true);
       await caught;
       waiting("");
     } finally {
       client.dispose();
+      if (priorState === undefined) delete process.env.AGENT_STATE_DIR;
+      else process.env.AGENT_STATE_DIR = priorState;
       fs.rmSync(root, { recursive: true, force: true });
     }
   },

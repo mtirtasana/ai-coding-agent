@@ -10,6 +10,13 @@ from agent.cli import main
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        env = patch.dict('os.environ', {'AGENT_STATE_DIR': temp.name, 'AGENT_CONFIG_DIR': temp.name})
+        env.start()
+        self.addCleanup(env.stop)
+
     def invoke(self, *arguments):
         output, error = io.StringIO(), io.StringIO()
         with patch.object(sys, 'argv', ['coding-agent', *arguments]), \

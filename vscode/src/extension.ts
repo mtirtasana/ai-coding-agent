@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { EditorTools } from "./editor";
 import { Runtime } from "./runtime";
 import { RpcClient, RecordValue } from "./rpc";
@@ -19,6 +19,8 @@ const record = (value: unknown): RecordValue => {
   return value as RecordValue;
 };
 interface Session {
+  usageId: string;
+  connectionSignature?: string;
   folder: vscode.WorkspaceFolder;
   tools: EditorTools;
   client?: RpcClient;
@@ -49,6 +51,9 @@ export class Controller
   private runtime: Runtime;
   private manualInline = false;
   private attachments: string[] = [];
+  private usageClient?: RpcClient;
+  private usageGeneration = 0;
+  private usageStorageIncomplete = false;
   constructor(private context: vscode.ExtensionContext) {
     this.runtime = new Runtime(context);
   }
@@ -71,6 +76,7 @@ export class Controller
     if (!session) {
       const tools = new EditorTools(folder, () => this.publish());
       session = {
+        usageId: randomUUID(),
         folder,
         tools,
         mode: "plan",
@@ -96,6 +102,7 @@ export class Controller
       "genericAgent",
       session.folder.uri,
     );
+    session.connectionSignature ??= JSON.stringify([cfg.get("provider", "demo"), cfg.get("model", ""), cfg.get("baseUrl", "")]);
     const provider = cfg.get<string>("provider") || "demo";
     if (
       provider !== "demo" &&
@@ -123,6 +130,13 @@ export class Controller
         return this.bridge(session, method, params, current);
       },
       (params) => {
+        if (params.kind === "usage_warning") {
+          this.usageStorageIncomplete = true;
+          const data = record(params.data);
+          if (typeof data.message === "string")
+            void this.view?.webview.postMessage({ type: "progress", text: data.message });
+          return;
+        }
         if (!completion && session.client === client && !session.cancelled) {
           const kind =
             typeof params.kind === "string" ? params.kind : "progress";
@@ -151,6 +165,7 @@ export class Controller
         cfg.get<string>("model") ||
         "";
       const config: RecordValue = {
+        sessionId: session.usageId,
         protocolVersion: 1,
         workspace: session.folder.uri.fsPath,
         provider,
@@ -168,7 +183,7 @@ export class Controller
       const reply = record(await client.request("initialize", config));
       if (session.generation !== generation)
         throw Error("Operation cancelled.");
-      if (reply.protocolVersion !== 1 || reply.backendVersion !== "0.10.0")
+      if (reply.protocolVersion !== 1 || reply.backendVersion !== "0.11.0")
         throw Error("Incompatible backend. Run backend setup again.");
       return client;
     } catch (e) {
@@ -275,13 +290,61 @@ export class Controller
     const css = view.webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, "media/style.css"),
     );
-    view.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${css}"></head><body><header><h2>Coding Agent</h2><select id="folder" aria-label="Workspace folder"></select><p id="status"></p></header><nav><button data-action="setup">Set up backend</button><button data-action="configure">Provider</button><button data-action="plan">Plan</button><button data-action="acceptPlan">Accept plan</button><button data-action="new">New</button><button data-action="inline">Automatic completions</button></nav><main><section id="messages" aria-live="polite"></section><section><h3>Changes to review</h3><div id="proposals"></div></section><section><h3>Checks</h3><div id="checks"></div></section><section><h3>Editor diagnostics</h3><div id="diagnostics"></div></section></main><form id="form"><label for="task">Task</label><textarea id="task" rows="4" maxlength="100000"></textarea><p id="attachments"></p><button data-action="attach" type="button">Attach selection</button><button id="send" type="submit">Send</button><button data-action="stop" type="button">Stop</button></form><p id="progress" role="status"></p><script nonce="${nonce}" src="${js}"></script></body></html>`;
+    view.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${css}"></head><body><header><h2>Coding Agent</h2><select id="folder" aria-label="Workspace folder"></select><p id="status"></p></header><nav><button data-action="setup">Set up backend</button><button data-action="configure">Provider</button><button data-action="plan">Plan</button><button data-action="acceptPlan">Accept plan</button><button data-action="new">New</button><button data-action="inline">Automatic completions</button></nav><main><section id="messages" aria-live="polite"></section><section><h3>Changes to review</h3><div id="proposals"></div></section><section><h3>Checks</h3><div id="checks"></div></section><section aria-label="Recorded token usage"><h3>Token usage</h3><label>Period <select id="usage-period"><option value="session">This conversation</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="7d">Last 7 days (rolling)</option><option value="30d">Last 30 days (rolling)</option><option value="all">All recorded usage</option><option value="custom">Custom dates</option></select></label><label>From <input id="usage-start" type="date"></label><label>To (inclusive) <input id="usage-end" type="date"></label><label>Interface <select id="usage-interface"><option value="">All</option><option value="cli">CLI</option><option value="vscode">VS Code</option></select></label><label>Category <select id="usage-kind"><option value="">All</option><option value="agent">Agent</option><option value="completion">Completion</option></select></label><label>Provider <input id="usage-provider" maxlength="256"></label><label>Profile <input id="usage-profile" maxlength="256"></label><label>Model <input id="usage-model" maxlength="256"></label><button id="usage-refresh" type="button">Refresh usage</button><p>Filters apply on Refresh. Reports use this execution host’s local timezone.</p><div id="usage-report" aria-live="polite">Refresh to view recorded usage.</div></section><section><h3>Editor diagnostics</h3><div id="diagnostics"></div></section></main><form id="form"><label for="task">Task</label><textarea id="task" rows="4" maxlength="100000"></textarea><p id="attachments"></p><button data-action="attach" type="button">Attach selection</button><button id="send" type="submit">Send</button><button data-action="stop" type="button">Stop</button></form><p id="progress" role="status"></p><script nonce="${nonce}" src="${js}"></script></body></html>`;
     this.context.subscriptions.push(
       view.webview.onDidReceiveMessage((message: unknown) => {
         void this.action(message).catch((e) => this.error(e));
       }),
     );
     this.publish();
+  }
+  async showUsage(options: RecordValue = {}) {
+    this.trusted();
+    const generation = ++this.usageGeneration;
+    const session = this.session();
+    const sessionId = session.usageId;
+    if (!this.usageClient?.running) {
+      const python = await this.runtime.ready("demo");
+      if (generation !== this.usageGeneration) return;
+      this.usageClient = new RpcClient(python, this.context.globalStorageUri.fsPath,
+        async () => { throw Error("Usage queries have no editor callbacks."); }, () => {});
+    }
+    const query: RecordValue = { period: "session", ...options, sessionId };
+    const allowed = ["period", "start", "end", "provider", "profile", "model", "interface", "kind", "sessionId"];
+    if (Object.keys(query).some(key => !allowed.includes(key))) throw Error("Invalid usage query.");
+    for (const value of Object.values(query))
+      if (typeof value !== "string" || !value || value.length > 256) throw Error("Invalid usage filter.");
+    const volatileCalls: unknown[] = [];
+    const workers = [...this.sessions.values()].flatMap(item => [item.client, item.completion]);
+    await Promise.all(workers.filter(worker => worker?.running).map(async worker => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const pending = await Promise.race([
+          worker!.request("usage/pending"),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(Error("Usage snapshot timed out.")), 2000); }),
+        ]);
+        if (!Array.isArray(pending)) throw Error("Invalid usage snapshot.");
+        volatileCalls.push(...pending);
+      } catch {
+        this.usageStorageIncomplete = true;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let result: RecordValue;
+    const usageClient = this.usageClient;
+    try {
+      result = record(await Promise.race([
+        usageClient.request("usage/query", { ...query, volatileCalls }),
+        new Promise((_, reject) => { timer = setTimeout(() => { usageClient.dispose(); reject(Error("Usage query timed out. Refresh to retry.")); }, 5000); }),
+      ]));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (this.usageStorageIncomplete) result.storage_incomplete = true;
+    if (generation === this.usageGeneration && this.selected?.usageId === sessionId)
+      void this.view?.webview.postMessage({ type: "usage", report: result });
   }
   private error(error: unknown) {
     const text =
@@ -304,6 +367,10 @@ export class Controller
     }
     if (message.type === "configure") {
       await this.configure();
+      return;
+    }
+    if (message.type === "usage") {
+      await this.showUsage(message.options === undefined ? {} : record(message.options));
       return;
     }
     if (message.type === "folder") {
@@ -374,6 +441,8 @@ export class Controller
         session.completion?.dispose();
         session.client = session.completion = undefined;
         session.checkpoint = undefined;
+        session.usageId = randomUUID();
+        ++this.usageGeneration;
         session.messages = [];
         session.checks = [];
         session.permissions.clear();
@@ -826,6 +895,7 @@ export class Controller
       checks: session?.checks || [],
       diagnostics: this.diagnosticItems(),
       attachmentCount: this.attachments.length,
+      usageSession: session?.usageId,
     });
   }
   async foldersChanged() {
@@ -854,10 +924,23 @@ export class Controller
       s.completion?.dispose();
       s.client = s.completion = undefined;
       s.permissions.clear();
+      const cfg = vscode.workspace.getConfiguration("genericAgent", s.folder.uri);
+      const signature = JSON.stringify([cfg.get("provider", "demo"), cfg.get("model", ""), cfg.get("baseUrl", "")]);
+      if (s.connectionSignature !== undefined && signature !== s.connectionSignature) {
+        s.usageId = randomUUID();
+        s.checkpoint = undefined;
+        s.messages = [];
+        s.checks = [];
+        s.mode = "plan";
+        if (this.selected === s) this.attachments = [];
+        ++this.usageGeneration;
+      }
+      s.connectionSignature = signature;
     }
     this.publish();
   }
   dispose() {
+    this.usageClient?.dispose();
     for (const s of this.sessions.values()) {
       s.tools.cancel();
       if (s.client?.running)
@@ -898,6 +981,10 @@ export function activate(context: vscode.ExtensionContext) {
   );
   command("setup", () => controller.action({ type: "setup" }));
   command("configure", () => controller.configure());
+  command("usage", async () => {
+    await vscode.commands.executeCommand("genericAgent.sidebar.focus");
+    await controller.showUsage();
+  });
   command("stop", () => controller.stop());
   command("complete", () => controller.triggerCompletion());
   command("toggleInline", () => controller.toggleInline());

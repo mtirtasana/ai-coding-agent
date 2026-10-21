@@ -1,7 +1,7 @@
 # Documentation
 
 This documentation describes the generic coding agent implemented in version
-0.10.0, including the improved interactive CLI, focused range reads and the VS Code editor adapter on PR #1. The component reference and
+0.11.0, including provider profiles, historical usage reports, the improved interactive CLI, focused range reads and the VS Code editor adapter on PR #1. The component reference and
 ADRs are in English. Earlier operational guides are available in German or
 English as indicated below.
 
@@ -13,6 +13,7 @@ English as indicated below.
 | Understand why the system has this structure | [ADR index](adr/README.md) | The decision relevant to your change |
 | Use the VS Code extension | [Extension guide](../vscode/README.md) | [Editor architecture](vscode-extension.md) |
 | Reduce model input and measure tradeoffs | [Focused reads and context cost](token-efficiency.md) | [ADR-0017](adr/0017-focused-file-reads.md) |
+| Configure providers and inspect recorded token usage | [Providers and usage](providers-and-usage.md) | [ADR-0019](adr/0019-provider-profiles-and-keychains.md), [ADR-0020](adr/0020-host-local-usage-ledger.md) |
 | Run the agent | [Project README](../README.md) | [Interactive terminal](interactive.md) |
 | Modify and verify code | [Coding workflow](coding-workflow.md) | [Tests and linting](testing-and-linting.md), [security checks](security-checks.md) |
 | Read the existing German architecture guide | [Architecture](architecture.md) | [Component reference](components.md) for the formal model and evidence limits |
@@ -32,7 +33,7 @@ quantities or specify contracts; they are not claims of formal verification.
 Research references explain related ideas and do not establish benchmark results
 for this repository.
 
-SQLite storage, semantic retrieval, automatic summarization, model-response
+Conversation persistence, semantic retrieval, automatic summarization, model-response
 caching, OS process isolation and multi-agent orchestration remain unimplemented.
 There is no published live-model accuracy or token-saving result in these docs.
 

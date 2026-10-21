@@ -5,6 +5,7 @@ import threading
 from concurrent.futures import Future
 from dataclasses import asdict
 from pathlib import Path
+from uuid import UUID, uuid4
 
 from agent.adapters.execution import LocalCommandRunner
 from agent.adapters.models import DemoProvider, OllamaProvider, OpenAICompatibleProvider, OpenAIProvider
@@ -14,6 +15,7 @@ from agent.core.context import split_turns
 from agent.core.engine import Agent
 from agent.core.types import ConversationState, Message, ToolCall, ToolResult
 from agent.files import Workspace
+from agent.adapters.usage import UsageJournal, MeteredProvider
 
 PROTOCOL_VERSION = 1
 MAX_FRAME = 16 * 1024 * 1024
@@ -118,6 +120,8 @@ class Server:
         self.config = None
         self.state = ConversationState()
         self.closed = False
+        self.session_id = str(uuid4())
+        self.usage = UsageJournal(warn=lambda message: self.emit('usage_warning', {'message': message}))
 
     def send(self, value):
         frame = json.dumps({'jsonrpc': '2.0', **value}, ensure_ascii=True)
@@ -156,7 +160,7 @@ class Server:
 
     def initialize(self, params):
         allowed = {'protocolVersion', 'workspace', 'provider', 'model', 'baseUrl', 'apiKey', 'checks',
-                   'maxSteps', 'maxContextChars', 'checkpoint'}
+                   'maxSteps', 'maxContextChars', 'checkpoint', 'sessionId'}
         if set(params) - allowed or type(params.get('protocolVersion')) is not int or params.get('protocolVersion') != PROTOCOL_VERSION:
             raise ValueError('Incompatible protocol or configuration.')
         if params.get('provider') not in {'demo', 'openai', 'ollama', 'openai-compatible'}:
@@ -177,8 +181,12 @@ class Server:
             if type(params.get(key, default)) is not int or params.get(key, default) < 1:
                 raise ValueError('Invalid budget.')
         state = restore_state(params['checkpoint']) if 'checkpoint' in params else ConversationState()
+        if 'sessionId' in params:
+            if not isinstance(params['sessionId'], str) or str(UUID(params['sessionId'])) != params['sessionId']:
+                raise ValueError('Invalid usage session identifier.')
+            self.session_id = params['sessionId']
         self.config, self.workspace, self.state = params, workspace, state
-        return {'protocolVersion': PROTOCOL_VERSION, 'backendVersion': '0.10.0'}
+        return {'protocolVersion': PROTOCOL_VERSION, 'backendVersion': '0.11.0'}
 
     def run(self, params):
         if set(params) != {'task', 'mode'} or not isinstance(params['task'], str) or not params['task'].strip():
@@ -188,7 +196,7 @@ class Server:
         instructions = self.editor('editor/instructions', {})
         if not isinstance(instructions, str) or len(instructions) > 100000:
             raise ValueError('Invalid project instructions.')
-        model = self.provider_factory(self.config)
+        model = self.meter(self.provider_factory(self.config), 'agent')
         tools = EditorTools(self.workspace, self.editor, self.config.get('checks', {}), self.token)
         result = Agent(model, tools, self, mode=params['mode'], project_instructions=instructions,
                        max_steps=self.config.get('maxSteps', 15),
@@ -205,7 +213,7 @@ class Server:
             raise ValueError('Completion context limit exceeded.')
         if self.config['provider'] == 'demo':
             return {'text': '', 'usage': None}
-        model = self.provider_factory(self.config, completion=True)
+        model = self.meter(self.provider_factory(self.config, completion=True), 'completion')
         response = model.generate([Message('system', 'Return only the code to insert at <CURSOR>. No explanation, tools or markdown.'),
                                    Message('user', f"Language: {params['language']}\n{params['prefix']}<CURSOR>{params['suffix']}")], [])
         self.token.check()
@@ -213,6 +221,11 @@ class Server:
         if response.message.tool_calls or '```' in text:
             text = ''
         return {'text': text[:2000], 'usage': None if response.usage is None else asdict(response.usage)}
+
+    def meter(self, provider, kind):
+        model = self.config.get('model') or ('gpt-4.1' if self.config['provider'] == 'openai' else self.config['provider'])
+        return MeteredProvider(provider, self.usage, self.session_id, provider_name=self.config['provider'],
+                               model=model, profile='editor', interface='vscode', kind=kind)
 
     def handle(self, message):
         if not isinstance(message, dict) or message.get('jsonrpc') != '2.0':
@@ -233,6 +246,18 @@ class Server:
             return
         method, params = message['method'], message.get('params', {})
         try:
+            if method == 'usage/pending':
+                if params:
+                    raise ValueError('Unexpected pending-usage parameters.')
+                self.send({'id': request_id, 'result': self.usage.volatile_calls()})
+                return
+            if method == 'usage/query':
+                options = dict(params)
+                volatile = options.pop('volatileCalls', [])
+                if not isinstance(volatile, list) or len(volatile) > 10000:
+                    raise ValueError('Invalid volatile usage metadata.')
+                self.send({'id': request_id, 'result': self.usage.query(options, self.session_id, volatile)})
+                return
             if method == 'cancel':
                 self.send({'id': request_id, 'result': self.cancel()})
                 return
@@ -248,6 +273,7 @@ class Server:
                 result = {'checkpoint': asdict(self.state)}
             elif method == 'session/reset':
                 self.state = ConversationState()
+                self.session_id = str(uuid4())
                 result = {'checkpoint': asdict(self.state)}
             elif method in {'session/run', 'completion/generate'}:
                 self.token = CancellationToken()

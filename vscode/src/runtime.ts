@@ -6,7 +6,7 @@ import { sha } from "./shared";
 export class Runtime {
   constructor(private context: vscode.ExtensionContext) {}
   private get directory() {
-    return path.join(this.context.globalStorageUri.fsPath, "backend-0.10.0");
+    return path.join(this.context.globalStorageUri.fsPath, "backend-0.11.0");
   }
   get python() {
     return path.join(

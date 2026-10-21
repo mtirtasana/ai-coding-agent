@@ -1,4 +1,4 @@
-# VS Code extension architecture (v0.2.1 / backend v0.10)
+# VS Code extension architecture (v0.3.0 / backend v0.11)
 
 The extension adds an editor adapter to the generic agent. It preserves the
 Python CLI and its file-based behavior. Read the [extension user guide](../vscode/README.md)
@@ -93,7 +93,7 @@ independently in Python and TypeScript. A range hash works with the existing
 reviewed edit flow; external changes or edits elsewhere in the buffer make it
 stale. See [focused reads](token-efficiency.md) for EOF semantics and paired
 evaluation, including overhead on small files. JSON-RPC remains protocol 1;
-the extension and bundled backend now require matching version 0.10.0. This
+the extension and bundled backend now require matching version 0.11.0. This
 backend also includes CLI workflow improvements; terminal review/attachments are
 CLI adapters and do not replace the editor's existing review flow.
 
@@ -207,3 +207,15 @@ Related records: [ADR-0013](adr/0013-vscode-workspace-extension.md),
 [ADR-0014](adr/0014-editor-buffer-ownership.md),
 [ADR-0015](adr/0015-cancellable-editor-workers.md),
 [ADR-0016](adr/0016-managed-runtime-and-vsix.md).
+
+## Usage reporting (0.3)
+
+**Coding Agent: Show Token Usage** and sidebar Refresh use an independent,
+credential-free report worker. `usage/query` works before initialization and while
+another worker runs. Agent/completion lanes receive one conversation UUID; New
+and provider/model/endpoint changes reset it, while worker replacement retains it.
+A read-only `usage/pending` snapshot shares failed-write metadata with the report
+worker, which deduplicates it against SQLite. Generation guards reject stale
+reports; deadlines bound report/snapshot waits. CLI and editor workers on the same
+host/state directory share historical metadata, but keep separate conversations
+and credential stores. See [schema, periods and privacy](providers-and-usage.md).

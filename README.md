@@ -59,6 +59,30 @@ mit Aufgabe bleiben erhalten und verwenden standardmäßig `implement`;
 Die [Terminal-Dokumentation](docs/interactive.md) beschreibt Befehle, Berechtigungen,
 Planübergabe, Fehlerbehandlung und Architektur mit Diagrammen.
 
+## Provider verbinden und Tokenstatistik
+
+```bash
+pip install -e '.[terminal,connections,openai]'
+coding-agent --connect
+coding-agent --profile work
+coding-agent --stats today
+coding-agent --stats custom --from 2026-10-01 --to 2026-10-21
+```
+
+Im Terminal stehen `/connect`, `/connect NAME`, `/providers` und `/stats` mit
+Tab-Vervollständigung bereit. Profile enthalten Referenzen auf den OS-Schlüsselbund;
+API-Schlüssel werden dort gespeichert. Ollama benötigt keinen Schlüsselbund.
+Ein erfolgreicher Profilwechsel beginnt eine neue Unterhaltung im Planungsmodus.
+`/stats` zeigt die aktuelle Unterhaltung; `today`, `week`, `month`, `7d`, `30d`,
+`all` und eigene Datumsbereiche zeigen historische Werte mit Filtern für Anbieter,
+Profil, Modell, Oberfläche und Kategorie. Fehlende Tokenwerte bleiben unbekannt.
+
+CLI und VS-Code-Worker erfassen Metadaten in einer lokalen SQLite-Datei pro
+Ausführungshost. In VS Code: **Coding Agent: Show Token Usage** oder **Refresh usage**
+in der Seitenleiste. Prompts, Quellcode und Schlüssel werden nicht in der Statistik
+abgelegt. Einrichtung, Speicherorte, Diagramme und Grenzen stehen im
+[Provider- und Statistikleitfaden](docs/providers-and-usage.md).
+
 ## Lokales Modell mit Ollama
 
 Ollama separat installieren, den Server starten und ein Modell mit Unterstützung

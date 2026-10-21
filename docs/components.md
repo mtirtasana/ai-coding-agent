@@ -22,6 +22,13 @@ Version 0.10 adds [interactive CLI composition, attachments and opt-in review](i
 with presentation adapters and an additive `tool_started` event. Direct CLI
 writes remain the default; editor approvals remain a separate adapter contract.
 
+Version 0.11 adds [provider profiles and a host-local usage ledger](providers-and-usage.md).
+`ConnectionController` composes existing providers; `OSVault` owns keychain access;
+`ProfileStore` owns nonsecret metadata; `MeteredProvider` records model-port calls;
+`UsageJournal` owns SQLite and read-only report aggregation. Neither the core nor
+context selection acquires a persistence dependency. The linked guide specifies
+schemas, unknown-value coverage, concurrency, session identity and failure behavior.
+
 ## 1. Problem, terminology and evidence
 
 The agent translates a natural-language coding request into observations,
@@ -571,7 +578,7 @@ explanation grading and a changing advisory database limit reproducibility.
 These are recommendations for an experiment, not additional implemented harness
 features.
 
-SQLite persistence, caching, relevance ranking, summaries, verification ledgers,
+Conversation persistence, caching, relevance ranking, summaries, verification ledgers,
 container isolation and multi-agent scheduling are deferred. Persisting H_t in
 a database alone would not change P_B(H_t, A) or transmitted context. Introducing
 them needs its own contracts, invalidation rules and evidence. See

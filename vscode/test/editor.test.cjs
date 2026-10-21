@@ -413,7 +413,7 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     await fs.mkdir(
       path.join(
         storage,
-        "backend-0.10.0",
+        "backend-0.11.0",
         process.platform === "win32" ? "Scripts" : "bin",
       ),
       { recursive: true },
@@ -432,13 +432,13 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     const runtime = controller.runtime;
     await fs.writeFile(runtime.python, "not executed");
     await fs.writeFile(
-      path.join(storage, "backend-0.10.0/ready.json"),
+      path.join(storage, "backend-0.11.0/ready.json"),
       JSON.stringify({ sha256: sha(bytes), sdk: false }),
     );
     assert.equal(await runtime.ready("demo"), runtime.python);
     await assert.rejects(runtime.ready("openai"), /Set Up/);
     await fs.writeFile(
-      path.join(storage, "backend-0.10.0/ready.json"),
+      path.join(storage, "backend-0.11.0/ready.json"),
       JSON.stringify({ sha256: "mismatch", sdk: true }),
     );
     await assert.rejects(runtime.ready("demo"), /Set Up/);
@@ -459,4 +459,38 @@ test("managed runtime requires matching wheel marker and SDK; corrupt setup neve
     } finally {
       vscode.window.showInputBox = oldInput;
     }
+  }));
+
+test("usage refresh works while busy without provider setup, overlays worker memory, and rejects stale reports", async () =>
+  fixture(async () => {
+    const controller = new Controller({ subscriptions: [] });
+    const session = controller.session(root);
+    controller.selected = session;
+    session.busy = true;
+    const posted = [];
+    const requests = [];
+    controller.view = { webview: { postMessage: value => posted.push(value) } };
+    controller.usageClient = { running: true, request: async (method, params) => {
+      requests.push([method, params]);
+      return { totals: { calls: 1 }, groups: [], storage_incomplete: false };
+    } };
+    session.client = { running: true, request: async method => {
+      assert.equal(method, "usage/pending");
+      return [{ request_id: "volatile-call" }];
+    } };
+    await controller.action({ type: "usage", options: { period: "all", kind: "completion" } });
+    assert.equal(posted.at(-1).type, "usage");
+    assert.equal(requests[0][1].sessionId, session.usageId);
+    assert.equal(requests[0][1].volatileCalls[0].request_id, "volatile-call");
+    assert.equal(session.busy, true);
+    session.client = undefined;
+    let release;
+    controller.usageClient.request = async () => new Promise(resolve => { release = resolve; });
+    const stale = controller.showUsage({ period: "session" });
+    while (!release) await new Promise(resolve => setTimeout(resolve, 1));
+    session.usageId = require("node:crypto").randomUUID();
+    release({ totals: {}, groups: [] });
+    await stale;
+    assert.equal(posted.filter(value => value.type === "usage").length, 1);
+    await assert.rejects(controller.showUsage({ invalidFilter: "x" }), /Invalid usage/);
   }));

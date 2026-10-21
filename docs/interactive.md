@@ -323,7 +323,7 @@ termination or a model request continuing on a remote server is not a resumable
 session checkpoint.
 
 History, proposed plans, accepted plans, and prompt input history live only in
-memory. There is no SQLite store, disk prompt history, restart resume, automatic
+memory. Usage metadata alone is stored in SQLite; see [profiles and reports](providers-and-usage.md). There is no disk prompt history, restart resume, automatic
 plan execution, or automatic execution of arbitrary commands. Version 0.5 adds the explicitly configured
 `run_tests` tool; see the [coding workflow guide](coding-workflow.md). Shell redirection or
 external terminal recording may still retain output.
@@ -371,3 +371,14 @@ Separate `run_security` and `run_dependency_audit` tools reuse the bounded comma
 runner and require explicit commands plus `--allow-exec`. Planning blocks both.
 The prompt adds effective `security:on/off` and `audit:on/off` indicators.
 See [Security checks](security-checks.md) for setup, CI, results and limitations.
+
+## Connecting and usage reports (0.11)
+
+`/connect` manages named profiles for existing providers, with hidden keys in the
+OS keychain. `/connect NAME` selects one and starts a fresh Plan conversation;
+`/providers` lists metadata only. Failed/cancelled setup keeps the current state.
+`/stats` reports the conversation; `/stats today|week|month|7d|30d|all` and custom
+`--from DATE --to DATE` support provider/profile/model/interface/category filters.
+`/new` changes the usage conversation UUID without deleting historical records.
+Standalone `--connect`, `--profile NAME` and `--stats [period]` are also available.
+Read [the full contract, storage locations and diagrams](providers-and-usage.md).

@@ -3,13 +3,13 @@
 **Status: teilweise umgesetzt; mit Version 0.7 und ADR-0012 abgeglichen.** Die regelbasierte Kontextauswahl
 (`recent`/`full`), Auswahlstatistiken und optionale Anbieter-Tokenwerte sind implementiert.
 Mehrteilige Konversation, Plan-/Implementierungsmodus und angeheftete Root-Regeln
-sind ebenfalls umgesetzt. SQLite, Speicher-Ports, Cache, Zusammenfassungen,
-TokenEstimator und relevante Dateiausschnitte sind weiterhin Vorschläge. Die folgende Gesamtarchitektur trennt
+sind ebenfalls umgesetzt. Eine unabhängige [SQLite-Nutzungsstatistik](providers-and-usage.md) ist seit 0.11 implementiert; Konversations-SQLite, Speicher-Ports, Cache, Zusammenfassungen,
+und TokenEstimator sind weiterhin Vorschläge. [Begrenzte Dateiausschnitte](token-efficiency.md) sind seit 0.9 umgesetzt. Die folgende Gesamtarchitektur trennt
 bewusst die aktuelle Basis vom geplanten Ausbau; das SQL ist keine Migration.
 Details zum aktuellen Verhalten stehen in der [Architekturdokumentation](architecture.md).
 
 Siehe auch [ADR-0012: Persistenz und Caching zurückstellen](adr/0012-defer-persistence-and-caching.md)
-für die aktuelle Entscheidung, die Implementierung weiterhin zurückzustellen.
+für die fortbestehende Zurückstellung von Konversation und Caching; [ADR-0020](adr/0020-host-local-usage-ledger.md) hebt diese Zurückstellung nur für Nutzungsmetadaten auf.
 
 ## Entscheidung
 

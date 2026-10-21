@@ -474,7 +474,7 @@ abgeschnitten noch zusammengefasst. `full` behält die vollständige Quelle oder
 `selected_chars`, `full_messages`, `selected_messages`, `dropped_rounds`.
 Die Quelle bleibt unverändert. In einer Sitzung bedeutet das nicht, dass das Modell
 immer alle früheren Details sieht; nur der feste Kontext ist garantiert erhalten.
-Es gibt keine Datenbank, persistente Sitzung oder Wiederaufnahme nach Prozessende.
+Es gibt keine persistente Konversation oder Wiederaufnahme nach Prozessende. Seit 0.11 speichert eine separate SQLite-Datei ausschließlich [Nutzungsmetadaten](providers-and-usage.md).
 
 ```mermaid
 stateDiagram-v2
@@ -693,7 +693,7 @@ Bestandteil des Grundgerüsts und sollte erst bei konkretem Bedarf hinzukommen.
 Der [Vorschlag für Kontextverwaltung und SQLite-Persistenz](context-and-persistence.md)
 beschreibt den weiteren Ausbau mit Speicher-Ports, Datenmodell und Cache-Invalidierung.
 Regelbasierte Kontextauswahl und Nutzungsmessung sind bereits implementiert;
-SQLite, Zusammenfassungen und Artefaktauswahl bleiben Vorschläge.
+Konversationsspeicherung in SQLite, Zusammenfassungen und Artefaktauswahl bleiben Vorschläge. Nutzungsmetadaten sind seit 0.11 separat umgesetzt; siehe [ADR-0020](adr/0020-host-local-usage-ledger.md).
 
 ## OpenAI-kompatible Endpoints und Evaluation
 

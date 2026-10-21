@@ -54,12 +54,28 @@ scans. Use **Explain** or **Propose fix** in the sidebar, or the corresponding
 Command Palette commands. Propose fix switches explicitly to implementation and
 still requires reviewing each edit.
 
+## Token usage
+
+Run **Coding Agent: Show Token Usage** or use **Refresh usage** in the sidebar.
+Choose conversation, today, week, month, rolling 7/30 days, all history or custom
+inclusive dates. Provider/profile/model, interface and agent/completion filters
+apply on Refresh. Reports work while the agent is busy, without model credentials,
+after backend setup. Unknown provider token counts remain unknown, with coverage.
+
+CLI and editor workers share a metadata-only SQLite ledger on the execution host.
+SSH/WSL/container storage is separate from desktop-host storage. Prompts, source,
+keys and raw endpoints are excluded. Database errors warn and mark reports
+incomplete while coding continues. **New** and provider changes start a new usage
+conversation without deleting history. The CLI's `/connect` profiles use OS vaults;
+the editor continues using **Configure Provider** and SecretStorage.
+See [usage architecture, dates and storage locations](../docs/providers-and-usage.md).
+
 ## Settings, privacy and recovery
 
 Backend 0.9 introduced bounded `read_file_range` requests over the current editor
 buffer, including unsaved text. The full-buffer hash still protects reviewed
 edits. Existing full reads remain available. See [focused reads and measured
-context cost](../docs/token-efficiency.md). Extension 0.2.1 bundles backend 0.10.0,
+context cost](../docs/token-efficiency.md). Extension 0.3.0 bundles backend 0.11.0,
 including the CLI workflow adapters. After installing it, run
 **Coding Agent: Set Up / Update Backend** to prepare its matching backend.
 

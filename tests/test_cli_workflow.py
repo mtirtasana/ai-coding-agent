@@ -29,6 +29,11 @@ class WorkflowFixture(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
+        storage = tempfile.TemporaryDirectory()
+        self.addCleanup(storage.cleanup)
+        env = patch.dict('os.environ', {'AGENT_STATE_DIR': storage.name, 'AGENT_CONFIG_DIR': storage.name})
+        env.start()
+        self.addCleanup(env.stop)
         self.workspace = Workspace(self.root, True)
         self.path = self.root / 'a.py'
         self.path.write_bytes(b'first\r\nvalue = 1\r\nlast\r\n')
@@ -305,7 +310,7 @@ class PromptWorkflowTests(WorkflowFixture):
     def test_tab_completes_quoted_workspace_files_and_slash_commands(self):
         (self.root / 'my file.py').write_text('text')
         self.assertEqual(self.prompt('/attach "my f\t\r'), "/attach 'my file.py'")
-        self.assertEqual(self.prompt('/sta\t\r'), '/status')
+        self.assertEqual(self.prompt('/statu\t\r'), '/status')
 
     def test_review_dependency_is_optional_and_missing_dependency_has_guidance(self):
         original = builtins.__import__

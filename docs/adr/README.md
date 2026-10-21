@@ -27,17 +27,19 @@ formal review process that did not occur.
 | [0009](0009-explicit-bounded-process-execution.md) | Execute explicit host commands with bounded capture | Accepted | Process runner and CLI |
 | [0010](0010-separate-verification-evidence.md) | Keep verification outcomes separate | Accepted | Tests, lint, security, audit and CI |
 | [0011](0011-metrics-and-independent-evaluation.md) | Report measured usage and independently checked fixtures | Accepted | Events and evaluation |
-| [0012](0012-defer-persistence-and-caching.md) | Defer durable persistence and caching | Accepted deferral | In-memory state and future storage |
+| [0012](0012-defer-persistence-and-caching.md) | Defer durable persistence and caching | Partially superseded by 0020 | Conversation/cache deferral remains |
 | [0013](0013-vscode-workspace-extension.md) | Add a workspace-host VS Code interface over stdio | Accepted | Sidebar and bridge |
 | [0014](0014-editor-buffer-ownership.md) | Review edits and let the editor own buffers | Accepted | Editor ToolExecutor |
 | [0015](0015-cancellable-editor-workers.md) | Separate completions and coordinate cancellation | Accepted | Workers and runner |
 | [0016](0016-managed-runtime-and-vsix.md) | Ship a managed backend and allowlisted VSIX | Accepted | Setup and packaging |
 | [0017](0017-focused-file-reads.md) | Prefer bounded excerpts and measure task-level context cost | Accepted | Retrieval, prompts and evaluation |
 | [0018](0018-interactive-cli-workflow.md) | Add bounded attachments and opt-in reviewed terminal writes | Accepted | CLI, prompts and presentation |
+| [0019](0019-provider-profiles-and-keychains.md) | Named CLI profiles and OS-keychain references | Accepted | Connection controller and profile store |
+| [0020](0020-host-local-usage-ledger.md) | Host-local metadata ledger with incomplete-usage coverage | Accepted | Metered provider, SQLite and report workers |
 
-
-Record 0012 accepts the decision to defer implementation. It does **not**
-accept a finished SQLite schema or imply that persistence or caching exists.
+Record 0012 still defers conversation persistence and caching. Record 0020
+partially supersedes it for usage metadata only. Records 0019–0020 were recorded
+on 2026-10-21.
 
 ## Record lifecycle
 

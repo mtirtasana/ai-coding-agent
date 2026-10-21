@@ -26,6 +26,6 @@ fs.writeFileSync(
       .update(fs.readFileSync(path.join(dest, name)))
       .digest("hex"),
     protocolVersion: 1,
-    backendVersion: "0.10.0",
+    backendVersion: "0.11.0",
   }),
 );

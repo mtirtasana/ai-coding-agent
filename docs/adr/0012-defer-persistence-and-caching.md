@@ -1,9 +1,13 @@
 # ADR-0012: Defer durable persistence and caching
 
-- Status: Accepted — decision to defer implementation
+- Status: Partially superseded by [ADR-0020](0020-host-local-usage-ledger.md) for usage metadata on 2026-10-21; conversation/cache deferral remains
 - Recorded: 2026-10-20
 - Scope: future storage and context optimization
 - Supersedes: none
+
+Usage metadata now has its own SQLite adapter under ADR-0020. The original
+rationale below remains applicable to conversations, artifacts and model caches;
+it is historical for the claim that no persistence adapter exists.
 
 ## Context
 

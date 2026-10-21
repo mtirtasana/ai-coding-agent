@@ -11,10 +11,11 @@ def token_count(value):
 
 class OpenAIProvider:
     """OpenAI Responses API; SDK wird nur beim Erstellen dieses Adapters geladen."""
-    def __init__(self, model: str, client=None, *, timeout=None, max_output_tokens=None):
+    def __init__(self, model: str, client=None, *, timeout=None, max_output_tokens=None, api_key=None):
         if client is None:
             from openai import OpenAI
-            client = OpenAI() if timeout is None else OpenAI(timeout=timeout, max_retries=0)
+            options = {} if api_key is None else {'api_key': api_key}
+            client = OpenAI(**options) if timeout is None else OpenAI(timeout=timeout, max_retries=0, **options)
         self.client, self.model = client, model
         self.max_output_tokens = max_output_tokens
 

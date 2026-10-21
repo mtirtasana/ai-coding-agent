@@ -2,7 +2,7 @@
   "name": "generic-coding-agent",
   "displayName": "Generic Coding Agent",
   "description": "Provider-independent planning, reviewed edits, verification and inline suggestions.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "mtirtasana",
   "license": "UNLICENSED",
   "repository": {
@@ -87,6 +87,10 @@
       {
         "command": "genericAgent.fixDiagnostic",
         "title": "Coding Agent: Propose Diagnostic Fix"
+      },
+      {
+        "command": "genericAgent.usage",
+        "title": "Coding Agent: Show Token Usage"
       }
     ],
     "keybindings": [
