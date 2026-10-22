@@ -1,5 +1,10 @@
 # Generischer KI-Coding-Agent
 
+Neu: [Batch-Inspektion, authentifizierte Belege und Aufgabenübergaben](docs/context-artifacts.md).
+`/seal <Entscheidungen und offene Arbeit>` archiviert abgeschlossene Historie;
+`/restore-task HANDLE` lädt sie ohne erneute Werkzeugausführung in Plan.
+`--persist-artifacts` aktiviert optionale verschlüsselte Ablage.
+
 Tokenverbrauch reduzieren: [Kontextsteuerung, abrufbare Prüfausgaben und Tokenbudgets](docs/token-efficiency.md).
 `--context-mode compact` aktiviert optionale Historienkomprimierung;
 `--max-context-tokens` und `--max-run-tokens` setzen zusätzliche geschätzte Limits.

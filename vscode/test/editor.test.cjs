@@ -62,6 +62,7 @@ const vscode = {
     },
   },
   window: {
+    showInputBox: async () => replies.shift(),
     showTextDocument: async (doc) => ({
       edit: async (action) => {
         let value;
@@ -112,6 +113,66 @@ async function proposal(tools) {
   assert.equal(tools.proposals.size, 1);
   return [...tools.proposals.keys()][0];
 }
+test("batch inspection uses dirty buffers, hashes and per-file errors without writes", async () =>
+  fixture(async (tools, dir) => {
+    await fs.writeFile(path.join(dir, "b.py"), "dependency = 2\n");
+    await fs.writeFile(path.join(dir, ".env"), "never-read-this");
+    const document = (await tools.read("a.py")).document;
+    document.text = "# dirty 😀\nvalue = 3\n";
+    document.version++;
+    const requests = ["a.py", "b.py", ".env", "../outside", "missing"].map(path => ({ path, start_line: 1, end_line: 2 }));
+    const reply = await tools.execute("batch_inspect", { requests }, "plan", () => true);
+    assert.equal(reply.ok, true, reply.content);
+    const data = JSON.parse(reply.content);
+    assert.deepEqual(data.results.map(item => item.ok), [true, true, false, false, false]);
+    assert.equal(data.results[0].content, document.text);
+    assert.equal(data.results[0].sha256, sha(document.text));
+    assert.equal(data.results[0].documentVersion, document.version);
+    assert.equal(data.stable, true);
+    assert.equal(data.atomic, false);
+    assert(!reply.content.includes("never-read-this"));
+    assert.equal(await fs.readFile(path.join(dir, "a.py"), "utf8"), "value = 1\n");
+    for (const requests of [[], Array(11).fill({path:"a.py",start_line:1,end_line:1}), [{path:"a.py",start_line:true,end_line:1}]]) {
+      assert.equal((await tools.execute("batch_inspect", { requests }, "plan", () => true)).ok, false);
+    }
+  }));
+test("batch detects document changes and cancellation during collection", async () =>
+  fixture(async tools => {
+    const original = tools.read.bind(tools);
+    let count = 0;
+    tools.read = async name => {
+      const snap = await original(name);
+      if (++count === 2) { snap.document.text = "changed"; snap.document.version++; }
+      return snap;
+    };
+    const request = { path: "a.py", start_line: 1, end_line: 1 };
+    const reply = await tools.execute("batch_inspect", { requests: [request] }, "plan", () => true);
+    assert.equal(JSON.parse(reply.content).stable, false);
+    assert.equal((await tools.execute("batch_inspect", { requests: [request] }, "plan", () => false)).ok, false);
+  }));
+test("task archive command requires idle state and clears approvals after success", async () =>
+  fixture(async tools => {
+    const controller = new Controller({ subscriptions: [] });
+    const session = controller.session(root);
+    session.permissions.add("old-approval");
+    const checkpoint = { messages: [{ role: "user", content: "Historical handoff" }, { role: "assistant", content: "Archived" }], latest_plan: null, accepted_plan: null };
+    let called = 0;
+    controller.initialize = async () => ({ request: async (method, params) => {
+      called++;
+      assert.equal(method, "session/seal");
+      assert.equal(params.summary, "Decision: preserve API. Open: inspect dependency.");
+      return { checkpoint, receipt: { persistent: false, handle: "handle" }, mode: "plan" };
+    }});
+    replies.push("Decision: preserve API. Open: inspect dependency.");
+    await controller.taskArchive("seal");
+    assert.equal(called, 1);
+    assert.equal(session.mode, "plan");
+    assert.equal(session.permissions.size, 0);
+    assert.equal(session.checkpoint, checkpoint);
+    session.busy = true;
+    await assert.rejects(controller.taskArchive("seal"), /Finish or stop/);
+    assert.equal(called, 1);
+  }));
 test("preview uses a small unified diff from the dirty buffer without editing", async () =>
   fixture(async (tools) => {
     const doc = (await tools.read("a.py")).document;

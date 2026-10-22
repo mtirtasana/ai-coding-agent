@@ -7,7 +7,7 @@ import stat
 import tempfile
 from collections import deque
 
-from .ranges import line_range
+from .ranges import line_range, validate_batch, MAX_BATCH_CHARS
 
 
 SKIP_DIRS = {'.git', '.ssh', '.aws', '.venv', 'venv', 'node_modules', '__pycache__',
@@ -37,6 +37,37 @@ class FileTools:
         return json.dumps({'path': resolved.relative_to(self.workspace.root).as_posix(),
                            'sha256': hashlib.sha256(raw).hexdigest(),
                            **line_range(text, start_line, end_line)}, ensure_ascii=False)
+
+    def batch_inspect(self, requests):
+        validate_batch(requests)
+        snapshots, results = {}, []
+        reserved = sum(len(json.dumps(item['path'], ensure_ascii=False)) + 200 for item in requests)
+        for request in requests:
+            name = request['path']
+            reserved -= len(json.dumps(name, ensure_ascii=False)) + 200
+            try:
+                if name not in snapshots:
+                    snapshots[name] = self._read(name)
+                resolved, raw, text = snapshots[name]
+                item = {'ok': True, 'path': resolved.relative_to(self.workspace.root).as_posix(),
+                        'sha256': hashlib.sha256(raw).hexdigest(),
+                        **line_range(text, request['start_line'], request['end_line'])}
+                trial = {'results': results + [item], 'stable': True, 'atomic': False}
+                if len(json.dumps(trial, ensure_ascii=False)) > MAX_BATCH_CHARS - reserved - 1280:
+                    item = {'ok': False, 'path': name, 'error': 'Batch output budget exceeded; request fewer ranges.'}
+            except (OSError, ValueError):
+                item = {'ok': False, 'path': name, 'error': 'Range unavailable, denied or outside text limits.'}
+            results.append(item)
+        stable = True
+        for name, (path, raw, _) in snapshots.items():
+            try:
+                current, current_raw, _ = self._read(name)
+                if current != path or current_raw != raw:
+                    stable = False
+            except (OSError, ValueError):
+                stable = False
+        return json.dumps({'results': results, 'stable': stable, 'atomic': False,
+                           'note': 'Sequential observations, revalidated at the end; hashes may become stale.'}, ensure_ascii=False)
 
     def search(self, path, query):
         if not query or len(query) > 512 or '\n' in query or '\r' in query:

@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from agent.adapters.execution import LocalCommandRunner
 from agent.adapters.models import DemoProvider, OllamaProvider, OpenAICompatibleProvider, OpenAIProvider, responses_items
-from agent.adapters.tools import ToolRegistry, spec, workspace_tools
+from agent.adapters.tools import ToolRegistry, spec, workspace_tools, archive_inspection
 from agent.core.cancellation import CancellationToken, RunCancelled
 from agent.core.context import ContextLimitError, split_turns
 from agent.core.engine import Agent, TokenBudgetError
@@ -19,6 +19,7 @@ from agent.files import Workspace
 from agent.adapters.usage import UsageJournal, MeteredProvider
 from agent.adapters.verification import VerifiedTools, workspace_fingerprint
 from agent.adapters.recovery import RecoveryStore
+from agent.adapters.artifacts import ArtifactSetupError
 
 PROTOCOL_VERSION = 2
 MAX_FRAME = 16 * 1024 * 1024
@@ -92,13 +93,15 @@ def make_provider(config, *, completion=False):
 
 
 class EditorTools(ToolRegistry):
-    def __init__(self, workspace, bridge, checks, token):
+    def __init__(self, workspace, bridge, checks, token, archive=None):
         super().__init__()
         self.workspace, self.bridge, self.token = workspace, bridge, token
         from agent.adapters.check_output import CheckOutputStore, register_output_reader
-        outputs = CheckOutputStore()
+        outputs = CheckOutputStore(archive=archive)
         for tool in workspace_tools(workspace).specifications():
             def handler(_name=tool.name, **args):
+                if _name == 'batch_inspect':
+                    return self.inspect_batch(args['requests'], archive)
                 # Apply the same Python path guard before the independently validated editor callback.
                 self.workspace.path(args.get('path', '.'))
                 self.token.check()
@@ -106,7 +109,8 @@ class EditorTools(ToolRegistry):
                 self.token.check()
                 if not isinstance(result, dict) or type(result.get('ok')) is not bool or not isinstance(result.get('content'), str):
                     raise ValueError('Invalid editor tool result.')
-                return ToolResult(result['ok'], result['content'])
+                content = archive_inspection(result['content'], archive) if _name in {'file_snapshot', 'read_file_range'} and result['ok'] else result['content']
+                return ToolResult(result['ok'], content)
             self.register(tool, handler)
         for profile, config in checks.items():
             def run(_profile=profile, _config=config):
@@ -117,15 +121,55 @@ class EditorTools(ToolRegistry):
                               'reason': 'permission_or_save_declined'}
                     self.bridge('editor/checkResult', {'profile': _profile, 'result': report})
                     return ToolResult(False, json.dumps(report))
-                result = LocalCommandRunner(workspace.root, _config['command'],
+                runner = LocalCommandRunner(workspace.root, _config['command'],
                                           _config.get('timeout', 120 if _profile == 'dependency_audit' else 60),
                                           _config.get('outputLimit', 65536), check=_profile,
-                                          cancellation=self.token).as_tool()
+                                          cancellation=self.token)
+                result = runner.as_tool()
                 self.bridge('editor/checkResult', {'profile': _profile, 'result': json.loads(result.content)})
-                return outputs.present(result)
+                import hashlib
+                return outputs.present(result, raw=runner.last_raw, metadata={
+                    'command_sha256': hashlib.sha256(json.dumps(_config['command']).encode()).hexdigest()})
             self.register(spec(PROFILES[profile], 'Run the configured check after editor permission and save checks.', {}), run)
         if checks:
             register_output_reader(self, outputs)
+        if archive is not None:
+            from agent.adapters.artifacts import register_artifact_reader
+            register_artifact_reader(self, archive)
+
+    def inspect_batch(self, requests, archive):
+        from agent.adapters.ranges import validate_batch
+        validate_batch(requests)
+        good, denied = [], {}
+        for index, item in enumerate(requests):
+            try:
+                self.workspace.path(item['path'])
+                good.append((index, item))
+            except (OSError, ValueError):
+                denied[index] = {'ok': False, 'path': item['path'], 'error': 'Range unavailable or denied.'}
+        self.token.check()
+        data = {'results': [], 'stable': True}
+        if good:
+            response = self.bridge('editor/tool', {'name': 'batch_inspect', 'arguments': {'requests': [item for _, item in good]}})
+            self.token.check()
+            if not isinstance(response, dict) or response.get('ok') is not True or not isinstance(response.get('content'), str):
+                raise ValueError('Invalid editor batch response.')
+            data = json.loads(response['content'])
+            if (not isinstance(data, dict) or not isinstance(data.get('results'), list) or
+                    len(data['results']) != len(good) or type(data.get('stable')) is not bool):
+                raise ValueError('Invalid editor batch observations.')
+        observed = {index: result for (index, _), result in zip(good, data['results'], strict=True)}
+        results = []
+        reserved = sum(len(json.dumps(item['path'], ensure_ascii=False)) + 200 for item in requests)
+        for index, request in enumerate(requests):
+            reserved -= len(json.dumps(request['path'], ensure_ascii=False)) + 200
+            item = denied.get(index, observed.get(index))
+            if len(json.dumps(results + [item], ensure_ascii=False)) > 22000 - reserved:
+                item = {'ok': False, 'path': request['path'], 'error': 'Batch output budget exceeded; request fewer ranges.'}
+            results.append(item)
+        content = json.dumps({'results': results, 'stable': data['stable'], 'atomic': False,
+                              'note': 'Sequential observations, revalidated by editor; hashes may become stale.'}, ensure_ascii=False)
+        return ToolResult(True, archive_inspection(content, archive))
 
 
 class Server:
@@ -144,6 +188,7 @@ class Server:
         self.usage = UsageJournal(warn=lambda message: self.emit('usage_warning', {'message': message}))
         self.recovery = RecoveryStore(warn=lambda message: self.emit('recovery_warning', {'message': message}))
         self.verification_records = {}
+        self.artifacts = None
 
     def send(self, value):
         frame = json.dumps({'jsonrpc': '2.0', **value}, ensure_ascii=True)
@@ -184,7 +229,7 @@ class Server:
     def initialize(self, params):
         allowed = {'protocolVersion', 'workspace', 'provider', 'model', 'baseUrl', 'apiKey', 'checks',
                    'maxSteps', 'maxContextChars', 'checkpoint', 'sessionId', 'persistSession', 'requestTimeout', 'maxOutputTokens',
-                   'contextMode', 'maxContextTokens', 'maxRunTokens'}
+                   'contextMode', 'maxContextTokens', 'maxRunTokens', 'persistArtifacts', 'contextPins'}
         if set(params) - allowed or type(params.get('protocolVersion')) is not int or params.get('protocolVersion') != PROTOCOL_VERSION:
             raise ValueError('Incompatible protocol or configuration.')
         if params.get('provider') not in {'demo', 'openai', 'ollama', 'openai-compatible'}:
@@ -209,6 +254,8 @@ class Server:
                 raise ValueError('Invalid token budget.')
         if params.get('contextMode', 'recent') not in {'recent', 'compact', 'full'}:
             raise ValueError('Invalid context mode.')
+        from agent.core.context import RuleBasedContextBuilder
+        RuleBasedContextBuilder(params.get('contextMode', 'recent'), pinned_paths=params.get('contextPins', []))
         state = restore_state(params['checkpoint']) if 'checkpoint' in params else ConversationState()
         timeout = params.get('requestTimeout', 120)
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
@@ -217,6 +264,12 @@ class Server:
             raise ValueError('Invalid output limit.')
         if type(params.get('persistSession', False)) is not bool:
             raise ValueError('Invalid recovery setting.')
+        if type(params.get('persistArtifacts', False)) is not bool:
+            raise ValueError('Invalid artifact setting.')
+        from agent.adapters.artifacts import ArtifactStore
+        persistent = params.get('persistArtifacts', False)
+        if self.artifacts is None or self.artifacts.workspace.root != workspace.root or self.artifacts.persistent != persistent:
+            self.artifacts = ArtifactStore(workspace, persistent=persistent)
         if 'sessionId' in params:
             if not isinstance(params['sessionId'], str) or str(UUID(params['sessionId'])) != params['sessionId']:
                 raise ValueError('Invalid usage session identifier.')
@@ -236,13 +289,14 @@ class Server:
         model = self.meter(self.provider_factory(self.config), 'agent')
         from agent.adapters.tokens import ModelTokenEstimator
         from agent.core.context import RuleBasedContextBuilder
-        tools = EditorTools(self.workspace, self.editor, self.config.get('checks', {}), self.token)
+        tools = EditorTools(self.workspace, self.editor, self.config.get('checks', {}), self.token, self.artifacts)
         verified = VerifiedTools(tools, lambda: workspace_fingerprint(self.workspace),
                                  configuration=self.config.get('checks', {}), records=self.verification_records)
         result = Agent(model, verified, self, mode=params['mode'], project_instructions=instructions,
                        max_steps=self.config.get('maxSteps', 15),
                        max_context_chars=self.config.get('maxContextChars', 200000), cancellation=self.token,
-                       context_builder=RuleBasedContextBuilder(self.config.get('contextMode', 'recent')),
+                       context_builder=RuleBasedContextBuilder(self.config.get('contextMode', 'recent'),
+                                                               pinned_paths=self.config.get('contextPins', [])),
                        max_context_tokens=self.config.get('maxContextTokens'), max_run_tokens=self.config.get('maxRunTokens'),
                        output_token_reserve=self.config.get('maxOutputTokens', 4096),
                        token_estimator=ModelTokenEstimator(self.config['provider'], self.config.get('model', '')),
@@ -347,6 +401,27 @@ class Server:
                 result = self.initialize(params)
             elif self.config is None:
                 raise ValueError('Initialize first.')
+            elif method == 'artifacts/read':
+                if set(params) != {'handle', 'offset', 'length'}:
+                    raise ValueError('Expected handle and byte range.')
+                result = json.loads(self.artifacts.read(**params))
+            elif method in {'session/seal', 'session/restoreTask'}:
+                from agent.adapters.handoff import seal_task, restore_task
+                expected = {'summary'} if method == 'session/seal' else {'handle'}
+                if set(params) != expected:
+                    raise ValueError('Invalid task archive request.')
+                if method == 'session/seal':
+                    if self.config.get('persistSession') and not self.artifacts.persistent:
+                        raise ValueError('Saved handoffs require persistent artifacts.')
+                    state, receipt = seal_task(self.workspace, self.state, self.artifacts, params['summary'])
+                else:
+                    state, receipt = restore_task(self.artifacts, params['handle']), None
+                result = {'checkpoint': asdict(state), 'receipt': receipt, 'mode': 'plan'}
+                frame = json.dumps({'jsonrpc': '2.0', 'id': request_id, 'result': result}, ensure_ascii=True)
+                if len(frame.encode('utf-8')) > MAX_FRAME:
+                    raise ValueError('Archived task exceeds the protocol response limit.')
+                self.state = state
+                self.verification_records.clear()
             elif method == 'session/acceptPlan':
                 self.state.accepted_plan = self.state.latest_plan
                 result = {'checkpoint': asdict(self.state)}
@@ -378,6 +453,8 @@ class Server:
                 self.send({'id': request_id, 'error': {'code': -32601, 'message': 'Unknown method.'}})
                 return
             self.send({'id': request_id, 'result': result})
+        except ArtifactSetupError as exc:
+            self.send({'id': request_id, 'error': {'code': -32602, 'message': str(exc)}})
         except (ValueError, KeyError, TypeError, OSError):
             self.send({'id': request_id, 'error': {'code': -32602, 'message': 'Invalid request or backend configuration.'}})
 
@@ -413,3 +490,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

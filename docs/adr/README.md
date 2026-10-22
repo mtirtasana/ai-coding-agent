@@ -40,6 +40,7 @@ formal review process that did not occur.
 | [0022](0022-opt-in-recovery.md) | Opt-in completed-turn recovery | Accepted | Local snapshots and resume |
 | [0023](0023-locked-internal-releases.md) | Locked runtimes and explicit release gates | Accepted | Setup, locks and artifact manifest |
 | [0024](0024-token-efficient-context.md) | Retrievable excerpts, optional compaction and token guards | Accepted | Context, check output and inline inference |
+| [0025](0025-context-artifacts-and-task-sealing.md) | Bounded batches, authenticated artifacts and task sealing | Accepted | Observation recovery and context lifecycle |
 
 Records 0020 and 0022 partially supersede record 0012 for usage and opt-in
 conversation snapshots. Artifact caching remains deferred. Records 0019–0023 were recorded

@@ -34,6 +34,8 @@ RANGE_READ_INSTRUCTIONS = (
     'nearby context, expanding ranges when dependencies or behavior are unclear. Its hash '
     'covers the entire file and can be used for targeted edits. Use full-file reads when '
     'needed for correctness; never assume a range contains the whole file.'
+    ' When batch_inspect is available, group known ranges of related files in one call. '
+    'Check per-file errors and stability; batches are not atomic snapshots.'
 )
 
 

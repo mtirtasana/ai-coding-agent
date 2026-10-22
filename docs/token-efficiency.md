@@ -1,5 +1,9 @@
 # Token consumption and context controls
 
+Batch inspection, exact archived recovery, mandatory path observations and
+completed-task sealing extend these controls. See [context artifacts](context-artifacts.md)
+for command/API contracts, encryption opt-in and storage limits.
+
 Each model call sends the selected conversation and tool definitions. A large
 file read or command log therefore costs input again on later calls while it
 remains selected. Provider prompt caching may discount repeated input; it does

@@ -132,6 +132,11 @@ export function validateEditorArguments(
   name: string,
   args: Record<string, unknown>,
 ) {
+  if (name === "batch_inspect") {
+    if (Object.keys(args).length !== 1 || !Object.hasOwn(args, "requests")) throw Error("Expected batch requests.");
+    validateBatch(args.requests);
+    return;
+  }
   const fields: Record<string, string[]> = {
     list_files: ["path"],
     read_file: ["path"],
@@ -163,6 +168,15 @@ export function validateEditorArguments(
         throw Error("Expected positive integer line numbers.");
     } else if (typeof args[key] !== "string")
       throw Error("Expected string argument.");
+  }
+}
+export function validateBatch(value: unknown): asserts value is { path: string; start_line: number; end_line: number }[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 10) throw Error("Batch inspection requires 1–10 ranges.");
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw Error("Invalid batch range.");
+    validateEditorArguments("read_file_range", item);
+    if (!item.path.length || item.path.length > 1024 || item.end_line < item.start_line || item.end_line - item.start_line >= 200)
+      throw Error("Invalid batch range or path limit.");
   }
 }
 export function relativePath(root: string, name: string): string {

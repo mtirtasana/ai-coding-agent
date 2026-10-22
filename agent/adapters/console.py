@@ -18,6 +18,8 @@ def friendly_error(exc):
     name = type(exc).__name__
     if name == 'ConnectionSetupError':
         return str(exc)
+    if name == 'ArtifactSetupError':
+        return str(exc)
     if isinstance(exc, TerminalUnavailable):
         return "Interactive terminal and edit review require: pip install -e '.[terminal]'"
     if isinstance(exc, ImportError):

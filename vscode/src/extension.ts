@@ -127,7 +127,7 @@ export class Controller
       throw Error("Configure a model name first.");
     if (session.instructions === undefined)
       session.instructions = await this.loadInstructions(session);
-    const python = await this.runtime.ready(provider);
+    const python = await this.runtime.ready(provider, !completion && cfg.get("persistArtifacts", false));
     if (session.generation !== generation) throw Error("Operation cancelled.");
     const client = new RpcClient(
       python,
@@ -203,9 +203,11 @@ export class Controller
         maxSteps: cfg.get("maxSteps", 15),
         maxContextChars: cfg.get("maxContextChars", 200000),
         contextMode: cfg.get("contextMode", "recent"),
+        contextPins: cfg.get("contextPins", []),
         requestTimeout: cfg.get("requestTimeout", 120),
         maxOutputTokens: cfg.get("maxOutputTokens", 4096),
         persistSession: !completion && cfg.get("persistSession", false),
+        persistArtifacts: !completion && cfg.get("persistArtifacts", false),
       };
       for (const setting of ["maxContextTokens", "maxRunTokens"]) {
         const value = cfg.get<number>(setting, 0);
@@ -395,6 +397,51 @@ export class Controller
       error instanceof Error ? error.message : "Agent operation failed.";
     void vscode.window.showErrorMessage(text);
     void this.view?.webview.postMessage({ type: "progress", text });
+  }
+  async taskArchive(action: "seal" | "restore" | "read") {
+    this.trusted();
+    const session = this.session();
+    if (session.busy) throw Error("Finish or stop the current task before changing its history.");
+    const generation = session.generation;
+    const value = await vscode.window.showInputBox({
+      title: action === "seal" ? "Handoff: decisions and unresolved work (max 6000 characters)" : "Authenticated artifact handle",
+      ignoreFocusOut: true,
+    });
+    if (!value?.trim()) return;
+    if (session.busy || session.generation !== generation) throw Error("The task changed while the archive prompt was open.");
+    session.busy = true;
+    this.publish();
+    try {
+      const client = await this.initialize(session);
+      if (generation !== session.generation) throw Error("Archive operation cancelled.");
+      if (action === "read") {
+        const result = await client.request("artifacts/read", { handle: value.trim(), offset: 0, length: 4096 });
+        if (generation !== session.generation) return;
+        const document = await vscode.workspace.openTextDocument({ content: JSON.stringify(result, null, 2), language: "json" });
+        await vscode.window.showTextDocument(document);
+        return;
+      }
+      const result = record(await client.request(action === "seal" ? "session/seal" : "session/restoreTask",
+        action === "seal" ? { summary: value } : { handle: value.trim() }));
+      if (generation !== session.generation) return;
+      session.checkpoint = record(result.checkpoint);
+      session.mode = "plan";
+      session.permissions.clear();
+      session.checks = [];
+      session.checkRevisions.clear();
+      session.completionCache.clear();
+      session.completion?.dispose();
+      session.completion = undefined;
+      this.attachments = [];
+      const receipt = result.receipt ? record(result.receipt) : undefined;
+      const messages = session.checkpoint.messages;
+      session.messages = Array.isArray(messages) ? messages.filter(item => item && ["user", "assistant"].includes((item as RecordValue).role as string))
+        .map(item => ({ role: String((item as RecordValue).role), text: String((item as RecordValue).content || "") })) : [];
+      session.messages.push({ role: "status", text: receipt ? `Task archived (${receipt.persistent ? "encrypted disk" : "memory only"}). Handle: ${receipt.handle}` : "Task restored in Plan. Renew plan acceptance and verification." });
+    } finally {
+      if (generation === session.generation) session.busy = false;
+      this.publish();
+    }
   }
   async action(raw: unknown) {
     const message = record(raw);
@@ -1125,6 +1172,9 @@ export function activate(context: vscode.ExtensionContext) {
   command("exportDiagnostics", () => controller.diagnose(true));
   command("sessions", () => controller.savedSessions());
   command("deleteSession", () => controller.savedSessions(true));
+  command("sealTask", () => controller.taskArchive("seal"));
+  command("restoreTask", () => controller.taskArchive("restore"));
+  command("readArtifact", () => controller.taskArchive("read"));
   command("usage", async () => {
     await vscode.commands.executeCommand("genericAgent.sidebar.focus");
     await controller.showUsage();
@@ -1154,7 +1204,7 @@ export function activate(context: vscode.ExtensionContext) {
           "checks",
           "maxSteps",
           "maxContextChars",
-          "contextMode", "maxContextTokens", "maxRunTokens",
+          "contextMode", "maxContextTokens", "maxRunTokens", "contextPins", "persistArtifacts",
           "inline.model",
           "requestTimeout", "maxOutputTokens", "persistSession",
         ].some((k) => e.affectsConfiguration("genericAgent." + k))

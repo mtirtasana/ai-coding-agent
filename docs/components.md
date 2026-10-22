@@ -256,6 +256,12 @@ See [ADR-0004](adr/0004-capability-based-planning.md).
 
 ## 6. Context selection
 
+Completed-task retirement, mandatory path observations and authenticated recovery
+are described in [context artifacts](context-artifacts.md). The handoff application
+service validates checkpoints and archives them before replacing history; it
+does not add a provider dependency to the core. The optional MCP adapter exposes
+only guarded observation and recovery tools.
+
 Optional `compact` projection and token-budget guards extend the default policy
 below. Their reference semantics, output reserves, estimator limits and accuracy
 gates are specified in [token efficiency](token-efficiency.md) and

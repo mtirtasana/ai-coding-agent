@@ -31,7 +31,7 @@ assets = ET.SubElement(xml, 'Assets')
 ET.SubElement(assets, 'Asset', Type='Microsoft.VisualStudio.Code.Manifest', Path='extension/package.json', Addressable='true')
 ET.SubElement(assets, 'Asset', Type='Microsoft.VisualStudio.Services.Content.Details', Path='extension/README.md', Addressable='true')
 files = [root / name for name in ('package.json', 'README.md', 'backend/manifest.json',
-                                 'backend/runtime-base.txt', 'backend/runtime-openai.txt', 'backend/dependencies.json')]
+                                 'backend/runtime-base.txt', 'backend/runtime-openai.txt', 'backend/runtime-cli.txt', 'backend/dependencies.json')]
 files += [root / 'dist/extension.js', root / 'dist/webview.js', *sorted((root / 'media').glob('*')), wheel]
 assert all(p.is_file() and not p.is_symlink() for p in files)
 types_ns = 'http://schemas.openxmlformats.org/package/2006/content-types'

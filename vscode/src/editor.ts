@@ -12,6 +12,7 @@ import {
   validateText,
   lineRange,
   validateEditorArguments,
+  validateBatch,
 } from "./shared";
 
 export interface ToolReply {
@@ -235,6 +236,7 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
       if (!current() || !vscode.workspace.isTrusted)
         throw Error("Run cancelled or workspace untrusted.");
       validateEditorArguments(name, rawArgs);
+      if (name === "batch_inspect") return { ok: true, content: await this.batchInspect(rawArgs.requests, current) };
       const pathArg = rawArgs.path as string;
       if (["write_file", "apply_edit"].includes(name) && mode !== "implement")
         throw Error("Planning cannot edit files.");
@@ -338,6 +340,37 @@ export class EditorTools implements vscode.TextDocumentContentProvider {
         content: e instanceof Error ? e.message : "Editor operation failed.",
       };
     }
+  }
+  private async batchInspect(requests: unknown, current: () => boolean) {
+    validateBatch(requests);
+    const snapshots = new Map<string, Awaited<ReturnType<EditorTools["read"]>>>();
+    const versions = new Map<string, number>();
+    const results: Record<string, unknown>[] = [];
+    let reserved = requests.reduce((sum, item) => sum + JSON.stringify(item.path).length + 200, 0);
+    for (const request of requests) {
+      if (!current() || !vscode.workspace.isTrusted) throw Error("Inspection cancelled.");
+      reserved -= JSON.stringify(request.path).length + 200;
+      let item: Record<string, unknown>;
+      try {
+        let snap = snapshots.get(request.path);
+        if (!snap) { snap = await this.read(request.path); snapshots.set(request.path, snap); versions.set(request.path, snap.document.version); }
+        item = { ok: true, path: path.relative(await this.canonicalRoot(), snap.file).split(path.sep).join("/"),
+          sha256: snap.hash, documentVersion: snap.document.version,
+          ...lineRange(snap.text, request.start_line, request.end_line) };
+        if (JSON.stringify({ results: [...results, item], stable: true, atomic: false }).length > 24000 - reserved - 1280)
+          item = { ok: false, path: request.path, error: "Batch output budget exceeded; request fewer ranges." };
+      } catch { item = { ok: false, path: request.path, error: "Range unavailable, denied or outside text limits." }; }
+      results.push(item);
+    }
+    let stable = true;
+    for (const [name, original] of snapshots) {
+      try {
+        const now = await this.read(name);
+        if (now.file !== original.file || now.hash !== original.hash || now.document.version !== versions.get(name)) stable = false;
+      } catch { stable = false; }
+    }
+    if (!current() || !vscode.workspace.isTrusted) throw Error("Inspection cancelled.");
+    return JSON.stringify({ results, stable, atomic: false, note: "Sequential observations, revalidated at the end; hashes may become stale." });
   }
   private async search(name: string, query: string) {
     if (!query || query.length > 512 || /[\r\n]/.test(query))

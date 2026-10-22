@@ -17,7 +17,7 @@ if (result.status !== 0) process.exit(result.status || 1);
 const wheels = fs.readdirSync(dest).filter((x) => x.endsWith(".whl"));
 if (wheels.length !== 1) throw Error("Expected one backend wheel");
 const name = wheels[0];
-const locks = Object.fromEntries(["runtime-base.txt", "runtime-openai.txt", "dependencies.json"].map(file => [file,
+const locks = Object.fromEntries(["runtime-base.txt", "runtime-openai.txt", "runtime-cli.txt", "dependencies.json"].map(file => [file,
   crypto.createHash("sha256").update(fs.readFileSync(path.join(dest, file))).digest("hex")]));
 fs.writeFileSync(
   path.join(dest, "manifest.json"),

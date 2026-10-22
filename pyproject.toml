@@ -14,6 +14,8 @@ openai = ["openai>=1.66,<3"]
 terminal = ["prompt-toolkit>=3.0,<4"]
 connections = ["keyring>=25,<26"]
 tokens = ["tiktoken>=0.9,<1"]
+archives = ["cryptography>=46,<51", "keyring>=25,<26"]
+mcp = ["mcp>=1.30,<2", "anyio>=4.14.2,<5"]
 dev = ["ruff>=0.9,<1"]
 security = ["bandit[toml]>=1.8,<2", "pip-audit>=2.9,<3"]
 
@@ -21,6 +23,7 @@ security = ["bandit[toml]>=1.8,<2", "pip-audit>=2.9,<3"]
 coding-agent = "agent.cli:main"
 coding-agent-eval = "agent.evaluate:main"
 coding-agent-server = "agent.server:main"
+coding-agent-mcp = "agent.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["agent*"]

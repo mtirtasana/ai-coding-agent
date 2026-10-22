@@ -1,5 +1,11 @@
 # Generic Coding Agent for VS Code
 
+Batch reads use dirty buffers and report stability. **Seal Completed Task**,
+**Restore Archived Task** and **Read Archived Bytes** manage explicit handoffs.
+`genericAgent.persistArtifacts` opts into encrypted local archives after backend
+setup; `genericAgent.contextPins` retains selected file observations.
+See [context artifacts](../docs/context-artifacts.md) for limits and exact recovery.
+
 Token controls: `genericAgent.contextMode` (`recent`, opt-in `compact`, `full`),
 `genericAgent.maxContextTokens` and `genericAgent.maxRunTokens` (zero disables).
 See [token efficiency](../docs/token-efficiency.md) for reserve semantics,

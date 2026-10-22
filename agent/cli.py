@@ -79,11 +79,13 @@ def main():
                         help="recent: complete recent rounds; compact: also replace old large file reads with references; full: all history")
     parser.add_argument('--max-context-tokens', type=int, help='Estimated input plus output reserve per request; optional')
     parser.add_argument('--max-run-tokens', type=int, help='Cumulative run budget with estimated preflight checks; optional')
+    parser.add_argument('--context-pin', action='append', default=[], help='Keep reads of this relative file intact; repeat for at most 16 files.')
     parser.add_argument("--allow-write", action="store_true")
     review = parser.add_mutually_exclusive_group()
     review.add_argument('--review-edits', dest='review_edits', action='store_true', default=None, help='Review file edits (default with --allow-write)')
     review.add_argument('--no-review-edits', dest='review_edits', action='store_false', help='Explicitly permit direct writes for trusted automation')
     parser.add_argument('--persist-session', action='store_true', help=NOTICE)
+    parser.add_argument('--persist-artifacts', action='store_true', help='Opt in to encrypted local task/output archives; requires .[archives] and an unlocked OS vault or AGENT_ARCHIVE_KEY.')
     parser.add_argument('--request-timeout', type=float, default=120)
     parser.add_argument('--max-output-tokens', type=int, default=4096)
     parser.add_argument('--stats-export', type=Path, help='Export selected usage as JSON without overwriting files')
@@ -177,6 +179,8 @@ def main():
         parser.error("Lint fixes require --lint-command and --allow-write.")
     try:
         workspace = Workspace(args.workspace, args.allow_write)
+        from agent.adapters.artifacts import ArtifactStore
+        artifacts = ArtifactStore(workspace, persistent=args.persist_artifacts)
         runner = lint_runner = lint_fix_runner = None
         security_runners = {}
         if args.allow_exec:
@@ -249,7 +253,7 @@ def main():
             from agent.adapters.tokens import ModelTokenEstimator
             metered = MeteredProvider(model, journal, identity.id, provider_name=active.provider,
                                       model=active.model, profile=active.profile)
-            tools = workspace_tools(workspace, test_runner=runner,
+            tools = workspace_tools(workspace, test_runner=runner, archive=artifacts,
                                                lint_runner=lint_runner, lint_fix_runner=lint_fix_runner,
                                                **security_runners)
             if observer is not None or review_session is not None:
@@ -263,7 +267,7 @@ def main():
             return Agent(metered, verified,
                          EventFanout(observer, JsonlEventSink(sys.stderr) if args.verbose else None),
                          max_steps=args.max_steps, max_context_chars=args.max_context_chars,
-                         context_builder=RuleBasedContextBuilder(args.context_mode),
+                         context_builder=RuleBasedContextBuilder(args.context_mode, pinned_paths=args.context_pin),
                          max_context_tokens=args.max_context_tokens, max_run_tokens=args.max_run_tokens,
                          output_token_reserve=args.max_output_tokens,
                          token_estimator=ModelTokenEstimator(active.provider, active.model),
@@ -278,7 +282,7 @@ def main():
                              observer=observer, provider=active.provider,
                              model=active.model, connections=connections, usage=journal, identity=identity,
                              max_context_chars=args.max_context_chars, review_edits=args.review_edits,
-                             recovery=recovery, reset_verification=verification_records.clear).run(session)
+                             recovery=recovery, reset_verification=verification_records.clear, artifacts=artifacts).run(session)
         else:
             try:
                 from agent.core.types import ConversationState

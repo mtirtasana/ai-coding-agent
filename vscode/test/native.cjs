@@ -44,6 +44,17 @@ exports.run = async () => {
   assert.equal(range.content, "value = 1\n");
   assert.equal(range.total_lines, 2);
   assert.equal(range.sha256, snapshot.sha256);
+  const inspected = await tools.execute('batch_inspect', { requests: [
+    { path: 'review.py', start_line: 1, end_line: 2 },
+    { path: '.env', start_line: 1, end_line: 1 },
+  ] }, 'plan', () => true);
+  assert.equal(inspected.ok, true, inspected.content);
+  const batch = JSON.parse(inspected.content);
+  assert.equal(batch.results[0].sha256, snapshot.sha256);
+  assert.equal(batch.results[0].content, doc.getText());
+  assert.equal(batch.results[1].ok, false);
+  assert.equal(batch.atomic, false);
+  assert.equal(batch.stable, true);
   const preview = await tools.execute('preview_edit', { path: 'review.py', expected_sha256: range.sha256,
     old_text: 'value = 1', new_text: 'value = 2' }, 'plan', () => true);
   assert.equal(preview.ok, true, preview.content);
@@ -189,6 +200,23 @@ exports.run = async () => {
     await controller.action({ type: "new" });
     assert.notEqual(session.usageId, oldSession);
     assert.equal(session.mode, "plan");
+    assert(commands.includes('genericAgent.sealTask'));
+    assert(commands.includes('genericAgent.restoreTask'));
+    const client = await controller.initialize(session);
+    session.busy = true;
+    session.cancelled = false;
+    await client.request('session/run', { task: 'Inspect workspace', mode: 'plan' });
+    const sealed = await client.request('session/seal', { summary: 'Inspected workspace. Open: implementation review.' });
+    assert.equal(sealed.mode, 'plan');
+    assert.equal(sealed.checkpoint.messages.length, 2);
+    const archived = await client.request('artifacts/read', { handle: sealed.receipt.handle, offset: 0, length: 4096 });
+    assert.equal(archived.receipt.kind, 'task');
+    assert(archived.base64.length);
+    const restored = await client.request('session/restoreTask', { handle: sealed.receipt.handle });
+    assert.equal(restored.mode, 'plan');
+    assert(restored.checkpoint.messages.length > 2);
+    client.dispose();
+    session.busy = false;
     console.log("Native production tests passed: usage/diagnostic commands, credential-free reporting while busy, stale evidence and New conversation identity.");
   } finally {
     session.busy = false;

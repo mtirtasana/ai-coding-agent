@@ -1,5 +1,6 @@
 """Bounded local check logs and explicit, retrievable model-facing excerpts."""
 import json
+import hashlib
 from collections import OrderedDict
 from uuid import uuid4
 
@@ -8,13 +9,33 @@ from .ranges import line_range
 
 
 class CheckOutputStore:
-    def __init__(self, max_entries=8, max_chars=1024 * 1024):
+    def __init__(self, max_entries=8, max_chars=1024 * 1024, archive=None):
         self.entries = OrderedDict()
         self.max_entries, self.max_chars = max_entries, max_chars
+        self.archive = archive
 
-    def present(self, result):
+    def present(self, result, raw=None, metadata=None):
         """Preserve execution metadata; scanner output always remains verbatim."""
         data = json.loads(result.content)
+        def attach(report, captured, details):
+            if not isinstance(report, dict) or self.archive is None:
+                return
+            if isinstance(captured, dict):
+                for key in ('fix', 'lint'):
+                    value = captured.get(key)
+                    if isinstance(value, dict):
+                        attach(report.get(key), value.get('raw'), {'command_sha256': hashlib.sha256(
+                            json.dumps(value.get('command', [])).encode()).hexdigest()})
+            elif isinstance(captured, bytes):
+                try:
+                    from .artifacts import receipt_view
+                    receipt = self.archive.put('check', captured, {
+                        **(details or {}), **{key: report[key] for key in ('check', 'exit_code', 'passed', 'timed_out',
+                         'capture_complete', 'output_truncated', 'cancelled', 'elapsed_seconds') if key in report}})
+                    report['receipt'] = receipt_view(receipt)
+                except (OSError, ValueError):
+                    report['archive_error'] = 'Capture was not archived; status and inline output remain available.'
+        attach(data, raw, metadata)
 
         def project(report):
             if not isinstance(report, dict):

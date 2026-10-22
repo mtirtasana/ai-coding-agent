@@ -13,6 +13,9 @@ from agent.adapters.recovery import RecoveryStore
 
 
 COMMANDS = {
+    '/seal': 'Archive completed history: /seal <decisions and unresolved work>; continue in Plan.',
+    '/restore-task': 'Restore a sealed task by authenticated handle into Plan; never replay tools.',
+    '/raw': 'Read exact archived bytes as base64: /raw HANDLE [offset:length], max 4096 bytes.',
     "/plan": "Switch to read-only planning; /plan <task> also submits a task.",
     "/implement": "Accept the latest plan, switch mode, and wait (writes need --allow-write).",
     "/instructions": "Show the loaded workspace-root AGENTS.md snapshot.",
@@ -164,7 +167,8 @@ class InteractiveShell:
     def __init__(self, workspace, agent_factory, mode="plan", output=print, execution_enabled=False,
                  lint_enabled=False, lint_fix_enabled=False, security_enabled=False, audit_enabled=False,
                  observer=None, provider='unknown', model='unknown', max_context_chars=200000,
-                 review_edits=False, connections=None, usage=None, identity=None, recovery=None, reset_verification=lambda: None):
+                 review_edits=False, connections=None, usage=None, identity=None, recovery=None, reset_verification=lambda: None,
+                 artifacts=None):
         if mode not in {"plan", "implement"}:
             raise ValueError("Mode must be plan or implement.")
         self.workspace, self.agent_factory, self.mode = workspace, agent_factory, mode
@@ -176,6 +180,7 @@ class InteractiveShell:
         self.identity = identity or UsageSession()
         self.recovery, self.persist_current = recovery, recovery is not None
         self.reset_verification = reset_verification
+        self.artifacts = artifacts
         self.attachments = Attachments(workspace)
         self.draft = ''
         self.execution_enabled = execution_enabled
@@ -247,7 +252,7 @@ class InteractiveShell:
             suggestions = get_close_matches(command, COMMANDS, n=3, cutoff=0.4)
             self.output("Unknown command. " + ("Try: " + ", ".join(suggestions) if suggestions else "Use /help."))
             return True
-        if argument and command not in {"/plan", "/attach", "/detach", '/connect', '/stats', '/resume', '/session-delete'}:
+        if argument and command not in {"/plan", "/attach", "/detach", '/connect', '/stats', '/resume', '/session-delete', '/seal', '/restore-task', '/raw'}:
             self.output(f"{command} does not accept arguments. Use /help.")
             return True
         if command == "/exit":
@@ -271,6 +276,34 @@ class InteractiveShell:
                     self.output(format_usage(self.usage.query(parse_usage(argument), self.identity.id)))
             except (OSError, ValueError) as exc:
                 self.output(f'Usage query error: {safe_text(exc)}')
+        elif command in {'/seal', '/restore-task', '/raw'}:
+            try:
+                from agent.adapters.artifacts import ArtifactStore
+                from agent.adapters.handoff import seal_task, restore_task
+                if self.artifacts is None:
+                    self.artifacts = ArtifactStore(self.workspace)
+                if command == '/raw':
+                    arguments = shlex.split(argument)
+                    if len(arguments) not in {1, 2}:
+                        raise ValueError('Usage: /raw HANDLE [offset:length]')
+                    offset, length = (0, 4096) if len(arguments) == 1 else tuple(map(int, arguments[1].split(':')))
+                    self.output(self.artifacts.read(arguments[0], offset, length))
+                else:
+                    if command == '/seal':
+                        if self.recovery is not None and not self.artifacts.persistent:
+                            raise ValueError('Saved handoffs require --persist-artifacts; original conversation remains unchanged.')
+                        state, receipt = seal_task(self.workspace, self.state, self.artifacts, argument)
+                    else:
+                        state, receipt = restore_task(self.artifacts, argument), None
+                    self.state = state
+                    self.mode = 'plan'
+                    self.reset_verification()
+                    self.attachments.clear()
+                    self.output('Task archived. Handle: ' + receipt['handle'] if receipt else 'Task restored in Plan; approvals and verification must be renewed.')
+                    if receipt and not receipt['persistent']:
+                        self.output('Memory-only archive: recovery ends when this process exits. Use --persist-artifacts for encrypted disk storage.')
+            except (OSError, ValueError) as exc:
+                self.output('Task archive operation failed: ' + safe_text(exc))
         elif command in {'/sessions', '/resume', '/session-delete'}:
             try:
                 store = self.recovery or RecoveryStore(warn=self.output)

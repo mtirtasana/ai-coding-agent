@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — context artifacts and task handoffs
+
+- Bounded batch range inspection with dirty-buffer versions, full-file hashes,
+  per-file errors and explicit non-atomic stability checks.
+- Authenticated raw-capture/file receipts with exact byte-range retrieval;
+  opt-in encrypted archives, OS-vault keys, access rechecks, quotas and expiry.
+- User-supplied task handoffs archive validated completed checkpoints before
+  retiring history. CLI/editor seal and restore return to Plan without replay.
+- Mandatory file observations extend intra-task aging; provider continuation
+  chains and the newest rounds remain protected.
+- Optional read-only stdio MCP adapter, documentation and ADR-0025.
+
 ## Unreleased — token consumption
 
 - Scoped VS Code replacement diffs; concise retrievable test/lint output, preserving scanner findings.

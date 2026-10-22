@@ -1,5 +1,6 @@
 """Explicit local commands with bounded capture; this is not a sandbox."""
 import json
+import hashlib
 import math
 import os
 import signal
@@ -28,6 +29,7 @@ class LocalCommandRunner:
         if check not in {'test', 'lint', 'lint_fix', 'security', 'dependency_audit'}:
             raise ValueError('Unknown verification profile.')
         self.check = check
+        self.last_raw = None
 
     @staticmethod
     def _stop(process):
@@ -48,6 +50,7 @@ class LocalCommandRunner:
                 pass
 
     def run(self):
+        self.last_raw = None
         started = time.monotonic()
         # Only host-configured argv reaches this call; model tools cannot supply commands.
         with self.cancellation.guard():
@@ -110,8 +113,10 @@ class LocalCommandRunner:
             if process.poll() is not None:
                 self.cancellation.release(process)
         capture_complete = done.is_set() and capture_error is None
+        self.last_raw = bytes(captured)
         return {'check': self.check, 'passed': process.returncode == 0 and not timed_out and capture_complete and not self.cancellation.cancelled,
-                'exit_code': process.returncode, 'output': bytes(captured).decode('utf-8', errors='replace'),
+                'exit_code': process.returncode, 'output': self.last_raw.decode('utf-8', errors='replace'),
+                'captured_bytes': len(self.last_raw), 'raw_sha256': hashlib.sha256(self.last_raw).hexdigest(),
                 'elapsed_seconds': round(time.monotonic() - started, 6), 'timed_out': timed_out,
                 'output_truncated': truncated, 'capture_complete': capture_complete,
                 'capture_error': capture_error, 'cancelled': self.cancellation.cancelled}
@@ -131,11 +136,16 @@ class LintFixRunner:
         if fixer.root != lint.root:
             raise ValueError('Fix and lint commands must use the same workspace.')
         self.fixer, self.lint = fixer, lint
+        self.last_raw = None
 
     def as_tool(self):
+        self.last_raw = None
         fixed = self.fixer.run()
         linted = None if fixed['timed_out'] else self.lint.run()
         result = {'check': 'lint_fix',
                   'passed': fixed['passed'] and linted is not None and linted['passed'],
                   'fix': fixed, 'lint': linted, 'requires_test_rerun': True}
+        self.last_raw = {'fix': {'raw': getattr(self.fixer, 'last_raw', None), 'command': self.fixer.command},
+                         'lint': {'raw': getattr(self.lint, 'last_raw', None) if linted is not None else None,
+                                  'command': self.lint.command}}
         return ToolResult(result['passed'], json.dumps(result, ensure_ascii=False))

@@ -42,16 +42,17 @@ export class Runtime {
       throw Error("Invalid bundled backend manifest.");
     return m as { file: string; sha256: string; locks?: Record<string, string> };
   }
-  async ready(provider: string) {
+  async ready(provider: string, archives = false) {
     try {
       await fs.access(this.python);
       const expected = await this.manifest();
       const marker = JSON.parse(
         await fs.readFile(path.join(this.directory, "ready.json"), "utf8"),
-      ) as { sha256?: string; sdk?: boolean };
+      ) as { sha256?: string; sdk?: boolean; archives?: boolean };
       if (
         marker.sha256 !== expected.sha256 ||
-        (["openai", "openai-compatible"].includes(provider) && !marker.sdk)
+        (["openai", "openai-compatible"].includes(provider) && !marker.sdk) ||
+        (archives && !marker.archives)
       )
         throw Error();
       return this.python;
@@ -84,7 +85,8 @@ export class Runtime {
     );
     if (sha(await fs.readFile(wheel)) !== manifest.sha256)
       throw Error("Bundled wheel integrity check failed.");
-    for (const file of ["runtime-base.txt", "runtime-openai.txt", "dependencies.json"])
+    const archives = cfg.get<boolean>("persistArtifacts", false);
+    for (const file of ["runtime-base.txt", "runtime-openai.txt", "dependencies.json", ...(archives ? ["runtime-cli.txt"] : [])])
       if (sha(await fs.readFile(path.join(this.context.extensionPath, "backend", file))) !== manifest.locks?.[file])
         throw Error("Bundled runtime lock integrity check failed.");
     const sdk = ["openai", "openai-compatible"].includes(
@@ -113,7 +115,7 @@ export class Runtime {
           "import sys; assert (3,11) <= sys.version_info[:2] <= (3,14)",
         ]);
         await this.command(python, ["-I", "-m", "venv", candidate]);
-        const requirements = path.join(this.context.extensionPath, "backend", sdk ? "runtime-openai.txt" : "runtime-base.txt");
+        const requirements = path.join(this.context.extensionPath, "backend", archives ? "runtime-cli.txt" : sdk ? "runtime-openai.txt" : "runtime-base.txt");
         await this.command(candidatePython, ["-I", "-m", "pip", "install", "--require-hashes", "--only-binary=:all:", "-r", requirements]);
         await this.command(candidatePython, [
           "-I",
@@ -126,11 +128,11 @@ export class Runtime {
         await this.command(candidatePython, [
           "-I",
           "-c",
-          "import agent.server; assert agent.server.PROTOCOL_VERSION == 2",
+          "import agent.server; assert agent.server.PROTOCOL_VERSION == 2" + (archives ? "; import cryptography, keyring" : ""),
         ]);
         await fs.writeFile(
           path.join(candidate, "ready.json"),
-          JSON.stringify({ sha256: manifest.sha256, sdk }),
+          JSON.stringify({ sha256: manifest.sha256, sdk, archives }),
         );
         temporary = path.join(storage, ".active-" + randomUUID());
         let previous = "unavailable";

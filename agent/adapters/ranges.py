@@ -5,6 +5,19 @@ import re
 MAX_LINE_NUMBER = 2**53 - 1
 MAX_RANGE_LINES = 200
 MAX_RANGE_CHARS = 12000
+MAX_BATCH_CHARS = 24000
+
+
+def validate_batch(requests):
+    if not isinstance(requests, list) or not 1 <= len(requests) <= 10:
+        raise ValueError('Batch inspection requires 1–10 ranges.')
+    for item in requests:
+        if (not isinstance(item, dict) or set(item) != {'path', 'start_line', 'end_line'} or
+                not isinstance(item['path'], str) or not 1 <= len(item['path']) <= 1024 or
+                any(type(item[key]) is not int or not 1 <= item[key] <= MAX_LINE_NUMBER
+                    for key in ('start_line', 'end_line')) or
+                not 0 <= item['end_line'] - item['start_line'] < MAX_RANGE_LINES):
+            raise ValueError('Invalid batch range: expected path and inclusive lines (at most 200).')
 
 
 def line_range(text, start_line, end_line):
