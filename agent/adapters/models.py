@@ -1,12 +1,46 @@
+import json
 from collections.abc import Sequence
 from uuid import uuid4
 
-from agent.core.types import Message, ModelResponse, ModelUsage, ToolCall, ToolSpec
+from agent.core.types import Continuation, Message, ModelResponse, ModelUsage, ToolCall, ToolSpec
 
 
 def token_count(value):
     """Keep unavailable/malformed usage unknown; zero is a real reported count."""
     return value if type(value) is int and value >= 0 else None
+
+
+def responses_items(message: Message):
+    """Validate checkpoint data before replaying it as Responses input."""
+    continuation = message.continuation
+    if (message.role != "assistant" or continuation.format != "openai.responses.v1"
+            or not isinstance(continuation.payload, str)):
+        raise ValueError("Invalid Responses continuation.")
+    items = json.loads(continuation.payload)
+    if not isinstance(items, list):
+        raise ValueError("Invalid Responses output items.")
+    calls = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("Invalid Responses output item.")
+        kind = item.get("type")
+        if kind == "function_call":
+            if any(not isinstance(item.get(key), str) for key in ("call_id", "name", "arguments")):
+                raise ValueError("Invalid Responses function call.")
+            calls.append(ToolCall(item["call_id"], item["name"], item["arguments"]))
+        elif kind == "reasoning":
+            if (not isinstance(item.get("id"), str) or not isinstance(item.get("summary"), list)
+                    or ("encrypted_content" in item and not isinstance(item["encrypted_content"], str))):
+                raise ValueError("Invalid Responses reasoning item.")
+        elif kind == "message":
+            if item.get("role") != "assistant" or not isinstance(item.get("content"), list):
+                raise ValueError("Invalid Responses assistant item.")
+        else:
+            # Only custom function tools are enabled by this adapter.
+            raise ValueError("Unsupported Responses output item.")
+    if tuple(calls) != message.tool_calls:
+        raise ValueError("Responses continuation disagrees with tool calls.")
+    return items
 
 
 class OpenAIProvider:
@@ -22,6 +56,9 @@ class OpenAIProvider:
     def generate(self, messages: Sequence[Message], tools: Sequence[ToolSpec]) -> ModelResponse:
         items = []
         for message in messages:
+            if message.continuation is not None:
+                items.extend(responses_items(message))
+                continue
             if message.role == "tool":
                 items.append({"type": "function_call_output", "call_id": message.call_id,
                               "output": message.content})
@@ -35,6 +72,7 @@ class OpenAIProvider:
         response = self.client.responses.create(
             **options,
             model=self.model, input=items, store=False,
+            include=["reasoning.encrypted_content"],
             tools=[{"type": "function", "name": t.name, "description": t.description,
                     "parameters": t.parameters, "strict": True} for t in tools])
         calls = tuple(ToolCall(c.call_id, c.name, c.arguments)
@@ -47,7 +85,12 @@ class OpenAIProvider:
                 input_tokens=token_count(getattr(raw_usage, "input_tokens", None)),
                 output_tokens=token_count(getattr(raw_usage, "output_tokens", None)),
                 cached_input_tokens=token_count(getattr(details, "cached_tokens", None)))
-        return ModelResponse(Message("assistant", response.output_text, calls), usage, getattr(response, 'status', None) == 'incomplete')
+        continuation = Continuation("openai.responses.v1", json.dumps(
+            [item.model_dump(mode="json", exclude_none=True) for item in response.output],
+            ensure_ascii=False, separators=(",", ":")))
+        message = Message("assistant", response.output_text, calls, continuation=continuation)
+        responses_items(message)
+        return ModelResponse(message, usage, getattr(response, 'status', None) == 'incomplete')
 
 
 class OllamaProvider:

@@ -18,11 +18,19 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class Continuation:
+    """Opaque, immutable provider output; never displayed as assistant text."""
+    format: str
+    payload: str
+
+
+@dataclass(frozen=True)
 class Message:
     role: str
     content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     call_id: str | None = None
+    continuation: Continuation | None = None
 
 
 @dataclass(frozen=True)

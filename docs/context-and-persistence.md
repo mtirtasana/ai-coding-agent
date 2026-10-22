@@ -423,3 +423,24 @@ im Arbeitsspeicher umgesetzt. SQLite-Persistenz bleibt als austauschbarer Adapte
 zurückgestellt, bis Bedarf und Messungen sie rechtfertigen. Diese Reihenfolge
 adressiert zuerst den Tokenverbrauch und verhindert,
 dass ein Speicherlayer ohne messbaren Nutzen zum Zentrum der Architektur wird.
+
+
+## Stateless OpenAI Responses continuation
+
+Assistant messages retain the complete Responses output as an immutable JSON
+continuation alongside the provider-neutral text and tool-call projection.
+The OpenAI adapter replays those items exactly once, in their original order,
+including encrypted reasoning, and appends function-call outputs. Requests keep
+`store=False`; no server-side response chain or adapter-local history is used.
+
+An active turn with continuation data retains its entire tool chain. Context
+selection fails with a context-limit error if the chain cannot fit, and compact
+mode does not rewrite its tool results. Completed older turns remain optional
+atomic units. Continuation payload size contributes to character budgets and
+token estimates; encrypted payload length is not an exact reasoning-token count.
+
+Checkpoints and opt-in recovery preserve and validate continuation data. Legacy
+messages without this field remain readable. Other provider adapters use only
+the neutral text/tool projection. Continuation is not displayed as assistant
+text or written to the usage ledger; opt-in recovery stores it with conversation
+content under the existing snapshot size and retention limits.

@@ -93,7 +93,9 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_openai_tool_response(self):
         response = SimpleNamespace(output_text="", output=[SimpleNamespace(
-            type="function_call", call_id="a", name="list_files", arguments='{"path":"."}')])
+            type="function_call", call_id="a", name="list_files", arguments='{"path":"."}',
+            model_dump=lambda **kwargs: {"type": "function_call", "call_id": "a",
+                                         "name": "list_files", "arguments": '{"path":"."}'})])
         client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kwargs: response))
         self.assertEqual(OpenAIProvider("test", client).generate([], []).message.tool_calls[0].name,
                          "list_files")

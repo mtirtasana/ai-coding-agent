@@ -11,8 +11,9 @@ class ContextLimitError(RuntimeError):
 
 
 def message_chars(message: Message) -> int:
-    return len(message.content) + sum(len(call.name) + len(call.arguments)
+    return (len(message.content) + sum(len(call.name) + len(call.arguments)
                                       for call in message.tool_calls)
+            + (len(message.continuation.payload) if message.continuation is not None else 0))
 
 
 def context_chars(messages: Sequence[Message], tools: Sequence[ToolSpec]) -> int:
@@ -82,7 +83,11 @@ class RuleBasedContextBuilder:
             # remain intact. Never summarize arbitrary source text as instructions.
             rounds = [group for _, groups in turns for group in groups]
             projected = list(messages)
+            active_indices = {i for group in turns[-1][1] for i in group}
+            preserve_active = any(messages[group[0]].continuation is not None for group in turns[-1][1])
             for group in rounds[:-2]:
+                if preserve_active and group[0] in active_indices:
+                    continue
                 calls = {call.id: call for call in messages[group[0]].tool_calls}
                 for index in group[1:]:
                     message = messages[index]
@@ -121,9 +126,12 @@ class RuleBasedContextBuilder:
         kept_rounds = 0
         active_rounds = turns[-1][1]
         active_complete = True
+        preserve_active = any(messages[group[0]].continuation is not None for group in active_rounds)
         for group in reversed(active_rounds):
             size = sum(message_chars(messages[i]) for i in group)
             if selected_chars + size > max_chars:
+                if preserve_active:
+                    raise ContextLimitError("Responses continuation requires the complete active tool chain.")
                 if kept_rounds == 0:
                     raise ContextLimitError("Die neueste vollständige Runde passt nicht ins Zeichenbudget.")
                 active_complete = False

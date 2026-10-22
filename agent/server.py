@@ -9,12 +9,12 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from agent.adapters.execution import LocalCommandRunner
-from agent.adapters.models import DemoProvider, OllamaProvider, OpenAICompatibleProvider, OpenAIProvider
+from agent.adapters.models import DemoProvider, OllamaProvider, OpenAICompatibleProvider, OpenAIProvider, responses_items
 from agent.adapters.tools import ToolRegistry, spec, workspace_tools
 from agent.core.cancellation import CancellationToken, RunCancelled
 from agent.core.context import ContextLimitError, split_turns
 from agent.core.engine import Agent, TokenBudgetError
-from agent.core.types import ConversationState, Message, ToolCall, ToolResult
+from agent.core.types import Continuation, ConversationState, Message, ToolCall, ToolResult
 from agent.files import Workspace
 from agent.adapters.usage import UsageJournal, MeteredProvider
 from agent.adapters.verification import VerifiedTools, workspace_fingerprint
@@ -33,7 +33,9 @@ def restore_state(value):
     if not isinstance(value['messages'], list):
         raise ValueError('Invalid messages.')
     for item in value['messages']:
-        if not isinstance(item, dict) or set(item) != {'role', 'content', 'tool_calls', 'call_id'}:
+        if not isinstance(item, dict) or set(item) not in (
+                {'role', 'content', 'tool_calls', 'call_id'},
+                {'role', 'content', 'tool_calls', 'call_id', 'continuation'}):
             raise ValueError('Invalid message.')
         if not isinstance(item['role'], str) or not isinstance(item['content'], str):
             raise ValueError('Invalid message text.')
@@ -47,7 +49,17 @@ def restore_state(value):
             calls.append(ToolCall(**call))
         if item['call_id'] is not None and not isinstance(item['call_id'], str):
             raise ValueError('Invalid call reference.')
-        messages.append(Message(item['role'], item['content'], tuple(calls), item['call_id']))
+        raw = item.get('continuation')
+        continuation = None
+        if raw is not None:
+            if (not isinstance(raw, dict) or set(raw) != {'format', 'payload'}
+                    or any(not isinstance(v, str) for v in raw.values())):
+                raise ValueError('Invalid continuation.')
+            continuation = Continuation(**raw)
+        message = Message(item['role'], item['content'], tuple(calls), item['call_id'], continuation)
+        if continuation is not None:
+            responses_items(message)
+        messages.append(message)
     if messages:
         if any(m.role == 'system' for m in messages) or messages[-1].role != 'assistant' or messages[-1].tool_calls:
             raise ValueError('Only completed turns can be restored.')
