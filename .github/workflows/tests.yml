@@ -1,5 +1,8 @@
 name: Tests
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -10,4 +13,108 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m unittest discover -s tests -v
+      - run: pip install -e '.[terminal,connections,archives,mcp,dev]'
+      - name: Lint
+        run: python -m ruff check .
+      - name: Tests
+        run: python -m unittest discover -s tests -v
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e '.[security]'
+      - name: Static security analysis
+        run: python -m bandit -r agent
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Update audit environment build tools
+        run: python -m pip install --upgrade pip setuptools
+      - run: pip install -e '.[openai,terminal,connections,tokens,archives,mcp,dev,security]'
+      - name: Audit installed dependencies
+        run: python -m pip_audit --skip-editable
+
+  extension:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            vscode: stable
+          - os: ubuntu-latest
+            vscode: '1.95.3'
+          - os: windows-latest
+            vscode: stable
+          - os: macos-latest
+            vscode: stable
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: vscode
+    env:
+      AGENT_TEST_PYTHON: python
+      AGENT_BUILD_PYTHON: python
+      VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - name: Prepare reviewed backend build tools
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all: -r backend/runtime-base.txt
+      - run: python -m pip install -e '..[terminal,connections,dev]'
+      - name: CLI workflow regressions
+        run: python -m unittest discover -s ../tests -p test_cli_workflow.py -v
+      - name: Provider and usage regressions
+        run: python -m unittest discover -s ../tests -p test_connections_usage.py -v
+      - name: Production baseline regressions
+        run: python -m unittest discover -s ../tests -p test_production.py -v
+      - run: npm ci
+      - run: npm audit
+      - run: npm test
+      - run: npm run package
+      - name: Native extension tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:integration
+      - name: Native extension tests (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:integration
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-${{ matrix.os }}-${{ matrix.vscode }}
+          path: vscode/*.vsix
+
+  locked-runtime:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.11', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install hash-pinned CLI and provider dependencies
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all: -r vscode/backend/runtime-cli.txt
+      - name: Install backend without resolving new dependencies
+        run: python -m pip install --no-deps --no-build-isolation .
+      - name: Production regressions with resolved runtime
+        run: python -W error::ResourceWarning -m unittest discover -s tests -p test_production.py -v

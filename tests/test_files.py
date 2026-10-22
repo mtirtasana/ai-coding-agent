@@ -1,8 +1,11 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from agent.files import Workspace
+from agent.adapters.tools import workspace_tools
+from agent.core.types import ToolCall
 
 
 class WorkspaceTests(unittest.TestCase):
@@ -15,6 +18,16 @@ class WorkspaceTests(unittest.TestCase):
     def test_write_and_read(self):
         self.workspace.execute("write_file", {"path": "src/demo.py", "content": "x = 1\n"})
         self.assertEqual(self.workspace.execute("read_file", {"path": "src/demo.py"}), "x = 1\n")
+
+    def test_invalid_utf8_write_preserves_existing_file_and_creates_no_directory(self):
+        original = b'original content\r\n'
+        (self.root / 'existing.txt').write_bytes(original)
+        for name in ('existing.txt', 'new/sub/file.txt'):
+            result = workspace_tools(self.workspace).execute(ToolCall(
+                'bad', 'write_file', json.dumps({'path': name, 'content': '\ud800'})))
+            self.assertFalse(result.ok)
+        self.assertEqual((self.root / 'existing.txt').read_bytes(), original)
+        self.assertFalse((self.root / 'new').exists())
 
     def test_read_only(self):
         with self.assertRaises(ValueError):

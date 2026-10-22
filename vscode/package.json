@@ -1,0 +1,306 @@
+{
+  "name": "generic-coding-agent",
+  "displayName": "Generic Coding Agent",
+  "description": "Provider-independent planning, reviewed edits, verification and inline suggestions.",
+  "version": "0.4.0",
+  "publisher": "mtirtasana",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mtirtasana/ai-coding-agent"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:genericAgent.sidebar",
+    "onCommand:genericAgent.complete"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Setup, model requests, edits and commands require a trusted workspace.",
+      "restrictedConfigurations": [
+        "genericAgent.pythonPath",
+        "genericAgent.checks",
+        "genericAgent.baseUrl"
+      ]
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "genericAgent",
+          "title": "Coding Agent",
+          "icon": "media/agent.svg"
+        }
+      ]
+    },
+    "views": {
+      "genericAgent": [
+        {
+          "type": "webview",
+          "id": "genericAgent.sidebar",
+          "name": "Coding Agent"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "genericAgent.setup",
+        "title": "Coding Agent: Set Up / Update Backend"
+      },
+      {
+        "command": "genericAgent.configure",
+        "title": "Coding Agent: Configure Provider"
+      },
+      {
+        "command": "genericAgent.open",
+        "title": "Coding Agent: Open Sidebar"
+      },
+      {
+        "command": "genericAgent.stop",
+        "title": "Coding Agent: Stop"
+      },
+      {
+        "command": "genericAgent.complete",
+        "title": "Coding Agent: Suggest Inline Completion"
+      },
+      {
+        "command": "genericAgent.toggleInline",
+        "title": "Coding Agent: Toggle Automatic Completions"
+      },
+      {
+        "command": "genericAgent.explainDiagnostic",
+        "title": "Coding Agent: Explain Diagnostic"
+      },
+      {
+        "command": "genericAgent.fixDiagnostic",
+        "title": "Coding Agent: Propose Diagnostic Fix"
+      },
+      {
+        "command": "genericAgent.usage",
+        "title": "Coding Agent: Show Token Usage"
+      },
+      {
+        "command": "genericAgent.diagnose",
+        "title": "Coding Agent: Diagnose Setup"
+      },
+      {
+        "command": "genericAgent.exportDiagnostics",
+        "title": "Coding Agent: Export Redacted Diagnostics"
+      },
+      {
+        "command": "genericAgent.sessions",
+        "title": "Coding Agent: Resume Saved Conversation"
+      },
+      {
+        "command": "genericAgent.deleteSession",
+        "title": "Coding Agent: Delete Saved Conversation"
+      },
+      {
+        "command": "genericAgent.sealTask",
+        "title": "Coding Agent: Seal Completed Task"
+      },
+      {
+        "command": "genericAgent.restoreTask",
+        "title": "Coding Agent: Restore Archived Task"
+      },
+      {
+        "command": "genericAgent.readArtifact",
+        "title": "Coding Agent: Read Archived Bytes"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "genericAgent.complete",
+        "key": "ctrl+alt+space",
+        "mac": "cmd+alt+space",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Generic Coding Agent",
+      "properties": {
+        "genericAgent.provider": {
+          "type": "string",
+          "enum": [
+            "demo",
+            "openai",
+            "ollama",
+            "openai-compatible"
+          ],
+          "default": "demo",
+          "scope": "resource",
+          "description": "Backend provider. Demo performs no model requests."
+        },
+        "genericAgent.model": {
+          "type": "string",
+          "default": "",
+          "scope": "resource"
+        },
+        "genericAgent.baseUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Ollama or compatible endpoint; never include credentials."
+        },
+        "genericAgent.pythonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Python 3.11+ interpreter used to create the managed environment."
+        },
+        "genericAgent.maxSteps": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 15,
+          "scope": "resource"
+        },
+        "genericAgent.maxContextChars": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 200000,
+          "scope": "resource"
+        },
+        "genericAgent.inline.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Opt in to automatic active-document model requests."
+        },
+        "genericAgent.inline.model": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Optional completion model on the same provider/endpoint."
+        },
+        "genericAgent.checks": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "description": "Explicit test/lint/security/dependency_audit profiles: command argv, timeout, outputLimit. Requires session permission.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "timeout": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "outputLimit": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "genericAgent.persistSession": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "description": "Opt in to storing completed prompts and source excerpts locally. Saved conversations expire after 30 inactive days; resume starts in Plan."
+        },
+        "genericAgent.requestTimeout": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3600,
+          "default": 120,
+          "scope": "resource",
+          "description": "Provider request timeout in seconds. Requests are not automatically retried."
+        },
+        "genericAgent.maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "default": 4096,
+          "scope": "resource"
+        },
+        "genericAgent.contextMode": {
+          "type": "string",
+          "enum": [
+            "recent",
+            "compact",
+            "full"
+          ],
+          "default": "recent",
+          "scope": "resource",
+          "description": "Compact is opt-in: replace old large file reads with historical references; preserve the latest two rounds."
+        },
+        "genericAgent.maxContextTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "scope": "resource",
+          "description": "Estimated total context per request including the output reserve. 0 disables this additional guard; character limits still apply."
+        },
+        "genericAgent.maxRunTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "scope": "resource",
+          "description": "Per-task cumulative token guard using conservative input estimates and the output limit for preflight. 0 disables. This is not a billing guarantee."
+        },
+        "genericAgent.persistArtifacts": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "description": "Opt in to encrypted local source/output/task archives, outside the workspace. Requires backend setup and an unlocked OS vault or AGENT_ARCHIVE_KEY. Expires after 30 days; archived captures retain their truncation limits."
+        },
+        "genericAgent.contextPins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "maxItems": 16,
+          "default": [],
+          "scope": "resource",
+          "description": "Relative file paths whose read rounds remain intact in context. Pins may cause an explicit budget stop; they do not grant file access."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "npm run build && node scripts/test.cjs",
+    "test:integration": "npm run build && node scripts/integration.cjs",
+    "backend": "node scripts/backend.cjs",
+    "package": "npm run typecheck && npm run lint && npm run build && npm run backend && node scripts/package.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.95.0",
+    "@vscode/test-electron": "^2.5.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.0.0",
+    "ignore": "^5.3.2",
+    "jsdom": "^27.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "classification": "release-candidate",
+  "audience": "supervised internal teams using trusted projects",
+  "manual_checks": {
+    "openai_live": "pending",
+    "ollama_live": "pending",
+    "compatible_live": "pending",
+    "linux_unlocked_keychain": "pending",
+    "windows_unlocked_keychain": "pending",
+    "macos_unlocked_keychain": "pending"
+  }
+}

@@ -1,0 +1,49 @@
+# Changelog
+
+## Unreleased — context artifacts and task handoffs
+
+- Bounded batch range inspection with dirty-buffer versions, full-file hashes,
+  per-file errors and explicit non-atomic stability checks.
+- Authenticated raw-capture/file receipts with exact byte-range retrieval;
+  opt-in encrypted archives, OS-vault keys, access rechecks, quotas and expiry.
+- User-supplied task handoffs archive validated completed checkpoints before
+  retiring history. CLI/editor seal and restore return to Plan without replay.
+- Mandatory file observations extend intra-task aging; provider continuation
+  chains and the newest rounds remain protected.
+- Optional read-only stdio MCP adapter, documentation and ADR-0025.
+
+## Unreleased — token consumption
+
+- Scoped VS Code replacement diffs; concise retrievable test/lint output, preserving scanner findings.
+- Opt-in `compact` history projections, optional context/run token guards, output reserves and separately labeled estimates.
+- Optional OpenAI model tokenizer with a conservative provider-independent fallback.
+- Shared inline inference, short-lived exact-context reuse and cancellation of unused local completion workers.
+- Evaluation context-mode selection, regression coverage and ADR-0024.
+
+## 0.12.0 backend / 0.4.0 extension — internal release candidate
+
+- CLI file review is the default with write permission. Trusted automation must
+  explicitly use `--no-review-edits`. Direct file replacements are atomic.
+- Verification has host-owned passed/failed/stale/not-run/unknown evidence,
+  invalidated by input, configuration and editor changes.
+- `.gitignore` excludes discovery results; `.agentignore` denies all agent access.
+  Credential-path protection applies independently and cannot be overridden.
+- Opt-in completed-turn recovery resumes in Plan with renewed plan acceptance.
+  Saved conversations expire after 30 inactive days; usage history is retained.
+- Provider timeouts, output limits, truncated-response rejection, RPC deadlines,
+  bounded failed-write buffers, explicit usage export/pruning and redacted setup
+  diagnostics improve failure behavior.
+- Backend updates stage a separate environment, install hash-pinned dependencies
+  and publish the new runtime only after readiness checks. Protocol 2 requires a
+  matching extension/backend.
+- Internal artifacts include checksums, runtime locks, dependency inventory,
+  migration/rollback instructions and explicit pending live/keychain checks.
+
+Breaking operational changes: unattended CLI writes now require an explicit
+review opt-out; Python support is 3.11–3.14; existing editor installations need
+**Set Up / Update Backend**. No public registry publication is included.
+
+## 0.11.0 backend / 0.3.0 extension
+
+Named CLI provider profiles using OS-keychain references and shared host-local
+metadata-only usage reporting across CLI and editor workers.
